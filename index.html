@@ -2,19 +2,29 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>DiscordChats — Wolfpac</title>
   <style>
     :root { --bg:#202225; --bg-2:#2f3136; --bg-3:#36393f; --text:#e5e7eb; --muted:#a3a6aa; --accent:#ed4245; --brand:#7289da; }
+
     * { box-sizing:border-box }
-    body { margin:0; background:var(--bg-3); color:var(--text); font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial }
+    html, body { height:100%; }
+    body { 
+      margin:0; 
+      background:var(--bg-3); 
+      color:var(--text); 
+      font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      -webkit-text-size-adjust: 100%; /* prevent iOS auto zoom adjustments */
+    }
 
     .layout { 
       display: grid; 
       grid-template-columns: 380px 1fr; 
-      min-height: 100dvh;
-      height: auto;
+      height: 100vh; 
+      width: 100%;
+      overflow: hidden;
     }
+
     .left { 
       background: var(--bg-2); 
       border-right: 1px solid #1f2024; 
@@ -22,6 +32,7 @@
       flex-direction: column; 
       overflow: hidden; 
     }
+
     .guild{
       position: relative;
       height: 120px;               
@@ -49,32 +60,49 @@
       transform: translateY(-1px);
     }
     .guild img{ display:none; }
-    .cat { padding:10px 12px; font-weight:700; color:#cdd0d4; letter-spacing:.3px }
 
-    .center { display:flex; flex-direction:column; height:100% }
-    .channel-header { 
-      position: sticky; top: 0; z-index: 40;
-      padding:12px 16px; background:var(--bg-2); 
-      border-bottom:1px solid #1f2024; display:flex; align-items:center; gap:10px; 
-      font-weight:700 
-    }
+    .cat { padding:10px 12px; font-weight:700; color:#cdd0d4; letter-spacing:.3px }
+    .center { display:flex; flex-direction:column; height:100vh; min-width:0; }
+    .channel-header { padding:12px 16px; background:var(--bg-2); border-bottom:1px solid #1f2024; display:flex; align-items:center; gap:10px; font-weight:700 }
     .muted { color:var(--muted) }
     .feed { padding:14px 16px; overflow:auto }
     .row { display:flex; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.04) }
-    .avatar { width:44px; height:44px; border-radius:50%; object-fit:cover; background:#111 }
+    .avatar { width:44px; height:44px; border-radius:50%; object-fit:cover; background:#111; flex:0 0 auto; }
     .name { font-weight:700 }
-    .content { white-space:pre-wrap; margin-top:4px }
+    .content { white-space:pre-wrap; margin-top:4px; word-break:break-word; }
     .att { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px }
-    .att img { max-width:420px; height:auto; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
+    .att img { max-width:min(420px, 100%); height:auto; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
 
     .calendar { 
       padding: 10px 10px 14px; 
       overflow-y: auto; 
       overflow-x: hidden; 
     }
-    .cal { background:#26282d; border:1px solid #1b1c20; border-radius:10px; width:100%; }
-    .cal-head{ display:flex; align-items:center; justify-content:space-between; padding:8px; border-bottom:1px solid #1b1c20; }
-    .cal-side{ display:flex; align-items:center; gap:8px; }
+    
+    .cal { 
+      background: #26282d; 
+      border: 1px solid #1b1c20; 
+      border-radius: 10px; 
+      width: 100%; 
+    }
+    .cal-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between; 
+      padding:8px;
+      border-bottom:1px solid #1b1c20;
+      gap:8px;
+    }
+
+    .cal-side{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    
+    /* Make interactive controls 16px to prevent iOS zoom */
+    .cal-head button,
+    .cal-head select,
+    #search-input {
+      font-size:16px;
+    }
+
     .cal-head button{
       background:#1f2024; color:#d6d8dd; border:1px solid #16171a;
       border-radius:6px; padding:6px 10px; cursor:pointer; white-space:nowrap;
@@ -83,6 +111,7 @@
       background:#1f2024; color:#d6d8dd; border:1px solid #16171a;
       border-radius:6px; padding:6px 10px; white-space:nowrap;
     }
+
     .cal-week {
       display: grid;
       grid-template-columns: repeat(7, 1fr);
@@ -91,7 +120,12 @@
       font-size: 12px;
       letter-spacing: 0.3px;
     }
-    .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; padding:0 8px 10px 8px; }
+    .cal-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 6px;
+      padding: 0 8px 10px 8px;
+    }
     .day { position:relative; aspect-ratio:1/1; border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:600; border:1px solid #1b1c20; background:#202226; color:#d5d8dc }
     .day.muted { opacity:.45 }
     .day.has { cursor:pointer; background:#23262b }
@@ -118,83 +152,49 @@
       background:#1f2024; color:#e8eaed;
       border:1px solid #16171a; border-radius:8px; padding:10px 12px;
       outline:none;
+      /* font-size moved above so iOS won’t zoom */
     }
     #search-input::placeholder{ color:#9aa0a6 }
-    .hl{ background:#5f5345; color:#fff; border-radius:4px; padding:0 2px; }
+    .hl{
+      background:#5f5345; color:#fff; border-radius:4px; padding:0 2px;
+    }
+    
     #month{ min-width:140px; }
     #year{ width:88px; } 
-    #next{ position:absolute; right:8px; top:8px; }
 
-    /* Mobile nav controls (hidden on desktop) */
-    .hamburger, .close-nav{
-      display:none;
-      background:#1f2024; color:#e8eaed;
-      border:1px solid #16171a; border-radius:8px;
-      padding:8px 10px; line-height:1; cursor:pointer;
+    #next{
+      position:absolute;
+      right:8px;
+      top:8px;
     }
-    .hamburger{ margin-right:10px; }
-    .close-nav{ position:absolute; right:10px; top:10px; z-index:60; }
 
-    /* Backdrop for drawer */
-    #backdrop{
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,.45);
-      opacity: 0; pointer-events: none;
-      transition: opacity .18s ease;
-      z-index: 45;
-    }
-    #backdrop.show{ opacity:1; pointer-events:auto; }
-
-    /* ===== Mobile breakpoint ===== */
-    @media (max-width: 860px){
-      .layout{ grid-template-columns: 1fr; }
-
-      .left{
-        position: fixed; inset:0 auto 0 0;
-        width: 86%; max-width: 360px;
-        transform: translateX(-100%);
-        transition: transform .18s ease;
-        z-index: 50;
-        box-shadow: 2px 0 24px rgba(0,0,0,.35);
+    /* ---------- Mobile tweaks ---------- */
+    @media (max-width: 900px){
+      .layout {
+        grid-template-columns: 1fr;    /* stack */
+        height: 100dvh;                /* respect mobile viewport */
       }
-      .left.open{ transform: translateX(0); }
-
-      .hamburger, .close-nav{ display:inline-flex; }
-      .guild{ height: 96px; }
-      .cat{ padding: 8px 12px; }
-
-      .calendar{ padding:10px 8px 12px; }
-      .cal{ border-radius: 8px; }
-      .cal-head{ padding:6px; }
-      .cal-week{ font-size: 11px; padding: 6px; }
-      .cal-grid{ gap: 4px; padding: 0 6px 8px 6px; }
-      .day{ border-radius:6px; font-size:13px; }
-
-      .feed{ padding: 10px 10px 16px; }
-      .row{ gap:10px; padding:10px 0; }
-      .avatar{ width:38px; height:38px; }
-
-      .att{ gap:6px; }
-      .att img{ max-width:100%; width:100%; }
-    }
-
-    @media (min-width: 861px){
-      .att img{ max-width:420px; }
+      .left {
+        height: auto;
+        max-height: 55vh;             /* calendar/search zone height */
+        border-right: none;
+        border-bottom: 1px solid #1f2024;
+      }
+      .center {
+        height: calc(100dvh - 55vh);
+      }
+      .feed { padding:12px }
+      .avatar { width:40px; height:40px; }
     }
   </style>
 </head>
 <body>
   <div class="layout">
     <aside class="left">
-      <!-- mobile close button -->
-      <button id="close-nav" aria-label="Close menu" class="close-nav">✕</button>
-
       <div class="guild">
         <h1><span class="wolf">🐺</span> Wolfpac</h1>
       </div>
-
       <div class="cat">🐺・Chats</div>
-
       <div class="calendar">
         <!-- Calendar -->
         <div class="cal">
@@ -214,7 +214,6 @@
           <div id="cal-grid" class="cal-grid"></div>
         </div>
       </div>
-
       <div class="search">
         <div class="search-title">Search <span class="glass">🔍</span></div>
         <form id="search-form" action="javascript:;" novalidate autocomplete="off">
@@ -225,18 +224,10 @@
     </aside>
 
     <main class="center">
-      <div class="channel-header">
-        <!-- mobile hamburger -->
-        <button id="open-nav" aria-label="Open menu" class="hamburger">☰</button>
-        <span id="channel-title"># chat-archive</span>
-        <span class="muted" id="count"></span>
-      </div>
+      <div class="channel-header"><span id="channel-title"># chat-archive</span> <span class="muted" id="count"></span></div>
       <div id="messages" class="feed"></div>
     </main>
   </div>
-
-  <!-- backdrop for drawer -->
-  <div id="backdrop"></div>
 
 <script>
 const API_BASE = "https://discordchats-9ef6930e36f8.herokuapp.com/api";
@@ -311,6 +302,12 @@ function fillMonthYearRanges() {
   yr.innerHTML = yopt;
 }
 
+function blurActive(){
+  if (document.activeElement && typeof document.activeElement.blur === 'function') {
+    document.activeElement.blur();
+  }
+}
+
 function renderCalendar() {
   $('#month').value = String(curM);
   $('#year').value = String(curY);
@@ -352,11 +349,12 @@ function renderCalendar() {
       const badge = document.createElement('div'); badge.className='dot'; day.append(badge);
       const cnt = document.createElement('div'); cnt.className='count'; cnt.textContent = count>999 ? '999+' : String(count); day.append(cnt);
       day.addEventListener('click', async () => {
+        blurActive();            // drop focus → no lingering zoom
         selectedDay = key;
         [...grid.children].forEach(el => el.classList.remove('selected'));
         day.classList.add('selected');
         await loadMessages(key);
-        closeNav(); // nice for mobile
+        window.scrollTo({ top: 0, behavior: 'instant' });
       });
       if (selectedDay === key) day.classList.add('selected');
     }
@@ -366,15 +364,17 @@ function renderCalendar() {
 }
 
 $('#prev').addEventListener('click', () => {
+  blurActive();
   if (curM === 0) { curM=11; curY--; } else { curM--; }
   renderCalendar();
 });
 $('#next').addEventListener('click', () => {
+  blurActive();
   if (curM === 11) { curM=0; curY++; } else { curM++; }
   renderCalendar();
 });
-$('#month').addEventListener('change', e => { curM = +e.target.value; renderCalendar(); });
-$('#year').addEventListener('change', e => { curY = +e.target.value; renderCalendar(); });
+$('#month').addEventListener('change', e => { blurActive(); curM = +e.target.value; renderCalendar(); });
+$('#year').addEventListener('change', e => { blurActive(); curY = +e.target.value; renderCalendar(); });
 
 async function loadDates() {
   try {
@@ -405,7 +405,6 @@ async function loadMessages(dateStr) {
     for (const m of msgs) wrap.append(messageRow(m));
     document.getElementById('count').textContent = msgs.length ? `(${msgs.length.toLocaleString()} msgs)` : '(0 msgs)';
     if (!msgs.length) wrap.innerHTML = '<div class="muted">No messages for this day.</div>';
-    window.scrollTo({ top: 0, behavior: 'instant' });
   } catch (e) {
     console.error(e); banner('Failed to load messages.', false);
   }
@@ -449,6 +448,7 @@ function setContentWithHighlight(containerEl, text, query){
   }
 }
 
+// --- row with highlight + date in header
 function messageRowWithHL(m, query){
   const row = document.createElement('div'); row.className='row';
   const av = document.createElement('img'); av.className='avatar';
@@ -488,6 +488,9 @@ async function doSearch(e){
   const q = (input.value || '').trim();
   if (!q) return;
 
+  input.blur();                // drop focus immediately → prevent iOS zoom persistence
+  blurActive();                // double-sure
+
   currentSearch = q;
   document.getElementById('channel-title').textContent = `# search — "${q}"`;
   document.getElementById('count').textContent = '';
@@ -502,7 +505,6 @@ async function doSearch(e){
       rows.length ? `(${rows.length.toLocaleString()} results)` : '(0 results)';
     document.getElementById('search-hint').textContent = rows.length ? '' : 'No matches.';
     window.scrollTo({ top: 0, behavior: 'instant' });
-    closeNav(); // close drawer after searching (mobile)
   } catch (err) {
     console.error(err);
     banner('Search failed.', false);
@@ -510,26 +512,7 @@ async function doSearch(e){
   }
 }
 
-/* ---------- Mobile drawer wiring ---------- */
-const left   = document.querySelector('.left');
-const openB  = document.getElementById('open-nav');
-const closeB = document.getElementById('close-nav');
-const backd  = document.getElementById('backdrop');
-
-function openNav(){
-  left.classList.add('open');
-  backd.classList.add('show');
-}
-function closeNav(){
-  left.classList.remove('open');
-  backd.classList.remove('show');
-}
-if (openB)  openB.addEventListener('click', openNav);
-if (closeB) closeB.addEventListener('click', closeNav);
-if (backd)  backd.addEventListener('click', closeNav);
-window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeNav(); });
-
-/* ---------- Boot ---------- */
+// Ensure form never navigates even if handler doesn't attach
 window.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('search-form');
   if (form) {
