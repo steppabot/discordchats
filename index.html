@@ -120,8 +120,6 @@ async function loadDates() {
   try {
     // quick connectivity check
     await fetchJSON('/health');
-    banner('Connected to backend ✓', true);
-  } catch { banner('Backend health check failed', false); }
 
   try {
     const dates = await fetchJSON('/dates');   // [{date, count}]
