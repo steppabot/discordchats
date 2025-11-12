@@ -2,7 +2,6 @@ import os
 import json
 import logging
 from typing import Optional, Dict, Any, List
-
 import asyncpg
 import boto3
 from fastapi import FastAPI, HTTPException, Query
@@ -284,6 +283,105 @@ async def messages(
             })
         return out
 
+@app.get("/api/search")
+async def search_messages(
+    q: str = Query(..., min_length=2, max_length=100, description="Search term"),
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0, le=100000),
+):
+    term = q.strip()
+    if not term:
+        raise HTTPException(status_code=400, detail="Empty search query")
+
+    try:
+        async with _pool.acquire() as conn:
+            try:
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        m.message_id,
+                        m.display_name,
+                        m.avatar_url,
+                        m.role_color_1,
+                        m.role_color_2,
+                        m.ts_local_time,
+                        m.ts_local_date,
+                        m.content,
+                        COALESCE(
+                          json_agg(
+                            json_build_object(
+                              's3_url',   a.s3_url,
+                              'url',      a.url,
+                              'filename', a.filename,
+                              'type',     a.content_type,
+                              'size',     a.size_bytes
+                            )
+                          ) FILTER (WHERE a.attachment_id IS NOT NULL),
+                          '[]'::json
+                        ) AS attachments
+                    FROM archived_messages m
+                    LEFT JOIN archived_attachments a
+                      ON a.message_id = m.message_id
+                    WHERE m.content ILIKE '%' || $1 || '%'
+                    GROUP BY m.message_id
+                    ORDER BY m.ts_utc ASC, m.channel_id ASC, m.message_id ASC
+                    LIMIT $2 OFFSET $3
+                    """,
+                    term, limit, offset
+                )
+            except Exception as join_err:
+                log.warning("Attachments join skipped in /api/search: %s", join_err)
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        m.message_id,
+                        m.display_name,
+                        m.avatar_url,
+                        m.role_color_1,
+                        m.role_color_2,
+                        m.ts_local_time,
+                        m.ts_local_date,
+                        m.content
+                    FROM archived_messages m
+                    WHERE m.content ILIKE '%' || $1 || '%'
+                    ORDER BY m.ts_utc ASC, m.channel_id ASC, m.message_id ASC
+                    LIMIT $2 OFFSET $3
+                    """,
+                    term, limit, offset
+                )
+                rows = [dict(r) | {"attachments": []} for r in rows]
+
+        out = []
+        for r in rows:
+            atts_in = r.get("attachments") or []
+            atts_out = []
+            for a in atts_in:
+                raw = a.get("s3_url") or a.get("url")
+                signed = _presign_if_stackhero(raw)
+                atts_out.append({
+                    "url": signed,
+                    "filename": a.get("filename"),
+                    "type": a.get("type"),
+                    "size": a.get("size"),
+                })
+
+            out.append({
+                "message_id": str(r["message_id"]),
+                "display_name": r["display_name"],
+                "avatar_url": r.get("avatar_url"),
+                "role_color_1": r.get("role_color_1"),
+                "role_color_2": r.get("role_color_2"),
+                "time": r.get("ts_local_time"),
+                "date": str(r.get("ts_local_date")) if r.get("ts_local_date") else None,
+                "content": r.get("content"),
+                "attachments": atts_out,
+            })
+
+        return {"ok": True, "q": term, "rows": out}
+
+    except Exception as e:
+        log.exception("/api/search failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         log.exception("/api/messages failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
