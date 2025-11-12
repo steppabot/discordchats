@@ -334,7 +334,7 @@ async def search_messages(
                       ON a.message_id = m.message_id
                     WHERE m.content ILIKE '%' || $1 || '%'
                     GROUP BY m.message_id
-                    ORDER BY m.ts_utc ASC, m.channel_id ASC, m.message_id ASC
+                    ORDER BY m.ts_utc DESC, m.channel_id DESC, m.message_id DESC
                     LIMIT $2 OFFSET $3
                     """,
                     term, limit, offset
@@ -356,7 +356,7 @@ async def search_messages(
                         m.content
                     FROM archived_messages m
                     WHERE m.content ILIKE '%' || $1 || '%'
-                    ORDER BY m.ts_utc ASC, m.channel_id ASC, m.message_id ASC
+                    ORDER BY m.ts_utc DESC, m.channel_id DESC, m.message_id DESC
                     LIMIT $2 OFFSET $3
                     """,
                     term, limit, offset
