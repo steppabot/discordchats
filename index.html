@@ -22,23 +22,19 @@
     }
     .guild{
       position: relative;
-      height: 120px;                 /* tweak 100–140px if you want */
+      height: 120px;               
       padding: 0;
-      background: url("wolfpac.gif") center/cover no-repeat; /* full-bleed GIF */
+      background: url("wolfpac.gif") center/cover no-repeat; 
       border-bottom: 1px solid #1f2024;
       overflow: hidden;
     }
-    /* dark gradient overlay (50–65% opacity) */
     .guild::before{
       content:"";
       position:absolute; inset:0;
       background:
-        linear-gradient(0deg, rgba(0,0,0,.60), rgba(0,0,0,.35)); /* top↔bottom */
-      /* If you prefer side fade instead, use 90deg */
-      /* background: linear-gradient(90deg, rgba(0,0,0,.65), rgba(0,0,0,.4)); */
+        linear-gradient(0deg, rgba(0,0,0,.60), rgba(0,0,0,.35)); 
     }
     .guild img { height:28px; border-radius:4px }
-    /* overlay title */
     .guild h1{
       position:absolute; left:16px; bottom:12px;
       margin:0;
@@ -47,12 +43,10 @@
       display:flex; align-items:center; gap:8px;
       text-shadow: 0 2px 6px rgba(0,0,0,.65), 0 0 12px rgba(0,0,0,.35);
     }
-    /* wolf emoji w/ subtle pop */
     .guild h1 .wolf{
       filter: drop-shadow(0 2px 4px rgba(0,0,0,.5));
       transform: translateY(-1px);
     }
-    /* if the old <img> remains, hide it */
     .guild img{ display:none; }
     .cat { padding:10px 12px; font-weight:700; color:#cdd0d4; letter-spacing:.3px }
     .center { display:flex; flex-direction:column; height:100vh }
@@ -66,7 +60,6 @@
     .att { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px }
     .att img { max-width:420px; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
 
-    /* Calendar styles */
     .calendar { 
       padding: 10px 10px 14px; 
       overflow-y: auto; 
@@ -82,13 +75,13 @@
     .cal-head{
       display:flex;
       align-items:center;
-      justify-content:space-between;  /* left group ↔ right group */
+      justify-content:space-between; 
       padding:8px;
       border-bottom:1px solid #1b1c20;
     }
     
 
-    .cal-side{ display:flex; align-items:center; gap:8px; }  /* same gap both sides */
+    .cal-side{ display:flex; align-items:center; gap:8px; }
     
     .cal-head button{
       background:#1f2024; color:#d6d8dd; border:1px solid #16171a;
@@ -98,7 +91,6 @@
       background:#1f2024; color:#d6d8dd; border:1px solid #16171a;
       border-radius:6px; padding:6px 10px; white-space:nowrap;
     }
-    /* ensure no overflow */
     .cal-week {
       display: grid;
       grid-template-columns: repeat(7, 1fr);
@@ -120,10 +112,9 @@
     .day.selected{ outline:2px solid var(--brand); box-shadow:0 0 0 2px rgba(114,137,218,.25) inset; }
     .dot { position:absolute; bottom:6px; right:6px; width:8px; height:8px; border-radius:50%; background:#4ade80 }
     .count { position:absolute; top:6px; right:6px; font-size:10px; color:#aeb4ba }
-    /* give Month a reasonable minimum, Year a fixed width */
-    /* size balance */
+
     #month{ min-width:140px; }
-    #year{ width:88px; } /* gives year a steady width so the right-side spacing feels identical */
+    #year{ width:88px; } 
 
     }
     #next{
@@ -181,7 +172,6 @@ function banner(msg, ok=true){
   document.body.prepend(bar);
 }
 
-/* fetch helper */
 async function fetchJSON(path) {
   const url = `${API_BASE}${path}`;
   const res = await fetch(url, {credentials:'omit'});
@@ -189,7 +179,6 @@ async function fetchJSON(path) {
   return res.json();
 }
 
-/* name color (no gradients) */
 function paintName(el, c1) {
   let color = '#ed4245';
   if (c1 && typeof c1 === 'string') {
@@ -200,7 +189,6 @@ function paintName(el, c1) {
   el.style.color = color;
 }
 
-/* message row */
 function messageRow(m) {
   const row = document.createElement('div'); row.className='row';
   const av = document.createElement('img'); av.className='avatar';
@@ -229,18 +217,16 @@ function messageRow(m) {
   return row;
 }
 
-/* ===== Calendar state ===== */
-let avail = new Map();        // 'YYYY-MM-DD' -> count
-let months = new Set();       // 'YYYY-MM' (for quick checks)
-let curY, curM;               // integers
-let selectedDay = null;       // 'YYYY-MM-DD'
+let avail = new Map();        
+let months = new Set();       
+let curY, curM;              
+let selectedDay = null;      
 
-/* build month/year selects */
 function fillMonthYearRanges() {
   const mo = $('#month'), yr = $('#year');
   const names = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   mo.innerHTML = names.map((n,i)=>`<option value="${i}">${n}</option>`).join('');
-  // years from min to max in data
+  
   const years = [...months].map(s=>+s.split('-')[0]);
   const ymin = Math.min(...years), ymax = Math.max(...years);
   let yopt = '';
@@ -248,7 +234,6 @@ function fillMonthYearRanges() {
   yr.innerHTML = yopt;
 }
 
-/* render grid for current curY/curM */
 function renderCalendar() {
   $('#month').value = String(curM);
   $('#year').value = String(curY);
@@ -258,23 +243,19 @@ function renderCalendar() {
   const startDay = first.getDay(); // 0..6
   const daysInMonth = new Date(curY, curM+1, 0).getDate();
 
-  // previous month trailing days to fill up to startDay
   const prevDays = startDay;
   const totalCells = 42; // 6 weeks
   const prevMonthDays = new Date(curY, curM, 0).getDate();
 
   const cells = [];
-  // trailing from previous month
   for (let i=prevDays-1; i>=0; i--) {
     const d = prevMonthDays - i;
     const date = new Date(curY, curM-1, d);
     cells.push({date, inMonth:false});
   }
-  // current month
   for (let d=1; d<=daysInMonth; d++) {
     cells.push({date:new Date(curY, curM, d), inMonth:true});
   }
-  // leading next month
   while (cells.length < totalCells) {
     const idx = cells.length - (prevDays + daysInMonth) + 1;
     cells.push({date:new Date(curY, curM+1, idx), inMonth:false});
@@ -306,7 +287,6 @@ function renderCalendar() {
   }
 }
   
-/* controls */
 $('#prev').addEventListener('click', () => {
   if (curM === 0) { curM=11; curY--; } else { curM--; }
   renderCalendar();
@@ -318,7 +298,6 @@ $('#next').addEventListener('click', () => {
 $('#month').addEventListener('change', e => { curM = +e.target.value; renderCalendar(); });
 $('#year').addEventListener('change', e => { curY = +e.target.value; renderCalendar(); });
 
-/* load dates + initialize calendar */
 async function loadDates() {
 
   try {
@@ -332,7 +311,7 @@ async function loadDates() {
 
     fillMonthYearRanges();
 
-    // jump to most recent month/day
+
     const latest = [...avail.keys()].sort().pop();
     selectedDay = latest;
     const [y,m] = latest.split('-');
@@ -345,7 +324,6 @@ async function loadDates() {
   }
 }
 
-/* load messages for the chosen day (unchanged from your version) */
 async function loadMessages(dateStr) {
   try {
     document.getElementById('channel-title').textContent = `# chat-archive — ${dateStr}`;
