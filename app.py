@@ -132,7 +132,7 @@ async def messages(
                       ON a.message_id = m.message_id
                     WHERE m.ts_local_date = $1
                     GROUP BY m.message_id
-                    ORDER BY m.ts_utc ASC, m.message_id ASC
+                    ORDER BY m.ts_utc ASC, m.channel_id ASC, m.message_id ASC
                     LIMIT $2
                     """,
                     d, limit
@@ -151,7 +151,7 @@ async def messages(
                         m.content
                     FROM archived_messages m
                     WHERE m.ts_local_date = $1
-                    ORDER BY m.ts_utc ASC, m.message_id ASC
+                    ORDER BY m.ts_utc ASC, m.channel_id ASC, m.message_id ASC
                     LIMIT $2
                     """,
                     d, limit
