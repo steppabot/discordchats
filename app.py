@@ -95,55 +95,83 @@ async def messages(
     date: str = Query(..., description="YYYY-MM-DD (local day)"),
     limit: int = Query(2000, ge=1, le=10000),
 ):
-    """Messages for a given local date, ordered like Discord."""
     try:
         async with _pool.acquire() as conn:
-            msgs = await conn.fetch(
-                """
-                SELECT message_id, guild_id, channel_id, user_id, display_name,
-                       ts_utc, ts_local_date, ts_local_time,
-                       role_color_1, role_color_2, avatar_url, content
-                FROM archived_messages
-                WHERE ts_local_date = $1::date
-                ORDER BY ts_local_date ASC, ts_local_time ASC, message_id ASC
-                LIMIT $2
-                """,
-                date, limit
-            )
+            # First try: include attachments via LEFT JOIN + JSON aggregation
+            try:
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        m.message_id,
+                        m.display_name,
+                        m.avatar_url,
+                        m.role_color_1,
+                        m.role_color_2,
+                        m.ts_local_time,
+                        m.content,
+                        COALESCE(
+                          json_agg(
+                            json_build_object(
+                              'url', COALESCE(a.s3_url, a.url),
+                              'filename', a.filename,
+                              'type', a.content_type,
+                              'size', a.size_bytes
+                            )
+                          ) FILTER (WHERE a.attachment_id IS NOT NULL),
+                          '[]'::json
+                        ) AS attachments
+                    FROM archived_messages m
+                    LEFT JOIN archived_attachments a
+                      ON a.message_id = m.message_id
+                    WHERE m.ts_local_date = $1::date
+                    GROUP BY m.message_id
+                    ORDER BY m.ts_local_time ASC, m.message_id ASC
+                    LIMIT $2
+                    """,
+                    date, limit
+                )
+            except Exception as join_err:
+                # Table missing or schema mismatch: fall back to messages only.
+                log.warning("Attachments join skipped: %s", join_err)
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        m.message_id,
+                        m.display_name,
+                        m.avatar_url,
+                        m.role_color_1,
+                        m.role_color_2,
+                        m.ts_local_time,
+                        m.content
+                    FROM archived_messages m
+                    WHERE m.ts_local_date = $1::date
+                    ORDER BY m.ts_local_time ASC, m.message_id ASC
+                    LIMIT $2
+                    """,
+                    date, limit
+                )
+                # Normalize to include empty attachments list so the UI code stays simple.
+                rows = [
+                    dict(r) | {"attachments": []}
+                    for r in rows
+                ]
 
-            # attachments (only ones we mirrored or original CDN fallback)
-            atts = await conn.fetch(
-                """
-                SELECT message_id,
-                       COALESCE(s3_url, url) AS href,
-                       filename, content_type, size_bytes
-                FROM archived_attachments
-                WHERE message_id = ANY($1::bigint[])
-                ORDER BY message_id, attachment_id
-                """,
-                [m["message_id"] for m in msgs] or [0],
-            )
-        by_mid: Dict[int, List[Dict[str, Any]]] = {}
-        for a in atts:
-            if not a["href"]:
-                continue
-            by_mid.setdefault(a["message_id"], []).append(
-                {"url": a["href"], "filename": a["filename"], "type": a["content_type"], "size": a["size_bytes"]}
-            )
-
+        # asyncpg Record -> plain dicts
         out = []
-        for m in msgs:
+        for r in rows:
             out.append({
-                "message_id": str(m["message_id"]),
-                "display_name": m["display_name"],
-                "avatar_url": m["avatar_url"],
-                "role_color_1": m["role_color_1"],
-                "role_color_2": m["role_color_2"],
-                "time": m["ts_local_time"],
-                "content": m["content"],
-                "attachments": by_mid.get(m["message_id"], []),
+                "message_id": str(r["message_id"]),
+                "display_name": r["display_name"],
+                "avatar_url": r.get("avatar_url"),
+                "role_color_1": r.get("role_color_1"),
+                "role_color_2": r.get("role_color_2"),
+                "time": r.get("ts_local_time"),
+                "content": r.get("content"),
+                "attachments": r.get("attachments") or [],
             })
         return out
+
     except Exception as e:
         log.exception("/api/messages failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
