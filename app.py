@@ -73,6 +73,30 @@ def _presign_if_stackhero(u: Optional[str]) -> Optional[str]:
                 return u
     return u
 
+async def _table_exists(conn: asyncpg.Connection, name: str) -> bool:
+    row = await conn.fetchrow(
+        "SELECT to_regclass($1) IS NOT NULL AS exists", name
+    )
+    return bool(row["exists"])
+
+def _row_to_public(m: dict) -> dict:
+    # Normalize attachments shape (list of {url, filename, type, size})
+    atts = m.get("attachments") or []
+    # If you later store s3_key instead of url, presign here:
+    # for a in atts:
+    #     if a.get("s3_key") and not a.get("url"):
+    #         a["url"] = presign_stackhero(a["s3_key"])
+    return {
+        "message_id": str(m["message_id"]),
+        "display_name": m["display_name"],
+        "avatar_url": m.get("avatar_url"),
+        "role_color_1": m.get("role_color_1"),
+        "time": m.get("ts_local_time"),
+        "content": m.get("content"),
+        "attachments": atts,
+    }
+
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
