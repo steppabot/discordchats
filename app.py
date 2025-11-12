@@ -283,6 +283,9 @@ async def messages(
             })
         return out
 
+# ------------------------------
+# Full-archive search (earliest → latest)
+# ------------------------------
 @app.get("/api/search")
 async def search_messages(
     q: str = Query(..., min_length=2, max_length=100, description="Search term"),
@@ -353,10 +356,9 @@ async def search_messages(
 
         out = []
         for r in rows:
-            atts_in = r.get("attachments") or []
             atts_out = []
-            for a in atts_in:
-                raw = a.get("s3_url") or a.get("url")
+            for a in (r.get("attachments") or []):
+                raw = (a.get("s3_url") or a.get("url"))
                 signed = _presign_if_stackhero(raw)
                 atts_out.append({
                     "url": signed,
@@ -381,7 +383,4 @@ async def search_messages(
 
     except Exception as e:
         log.exception("/api/search failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        log.exception("/api/messages failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
