@@ -6,12 +6,8 @@
   <title>DiscordChats — Wolfpac</title>
   <style>
     :root {
-      --bg: #202225;
-      --bg-2: #2f3136;
-      --bg-3: #36393f;
-      --text: #e5e7eb;
-      --muted: #a3a6aa;
-      --accent: #ed4245; /* default red for names with no role color */
+      --bg: #202225; --bg-2: #2f3136; --bg-3: #36393f;
+      --text: #e5e7eb; --muted: #a3a6aa; --accent: #ed4245;
     }
     * { box-sizing: border-box; }
     body { margin:0; background: var(--bg-3); color: var(--text); font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
@@ -19,28 +15,23 @@
     .left { background: var(--bg-2); border-right: 1px solid #1f2024; display:flex; flex-direction:column; }
     .guild { padding: 14px 12px; border-bottom:1px solid #1f2024; display:flex; align-items:center; gap:10px; background: var(--bg-2); }
     .guild img { height:28px; border-radius:4px; }
-    .guild h1 { margin:0; font-size:16px; font-weight:700; letter-spacing:.3px; display:flex; align-items:center; gap:8px; }
+    .guild h1 { margin:0; font-size:16px; font-weight:700; letter-spacing:.3px; }
     .cat { padding: 10px 12px; font-weight:700; color:#cdd0d4; letter-spacing:.3px; }
     .calendar { padding: 8px 12px; overflow:auto; }
     .dates { display:grid; grid-template-columns: repeat(3, 1fr); gap:6px; }
     .date-btn { background:#202226; color:#d5d8dc; border:1px solid #1b1c20; border-radius:6px; padding:8px 6px; cursor:pointer; text-align:center; }
     .date-btn:hover { background:#26282d; }
     .date-btn.active { outline:2px solid #7289da; }
-
     .center { display:flex; flex-direction:column; height:100vh; }
     .channel-header { padding: 12px 16px; background: var(--bg-2); border-bottom:1px solid #1f2024; display:flex; align-items:center; gap:10px; font-weight:700; }
+    .muted { color: var(--muted); }
     .feed { padding: 14px 16px; overflow:auto; }
-    .msg { display:flex; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.04); }
+    .row { display:flex; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.04); }
     .avatar { width:44px; height:44px; border-radius:50%; object-fit:cover; background:#111; }
-    .header { display:flex; align-items:center; gap:8px; }
     .name { font-weight:700; }
-    .time { color: var(--muted); font-size:12px; }
-    .wolf { margin-left:2px; opacity:.9; }
     .content { white-space: pre-wrap; margin-top:4px; }
     .att { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; }
-    .att img { max-width: 420px; border-radius:8px; border:1px solid rgba(255,255,255,.08); background:#111; }
-
-    .muted { color: var(--muted); }
+    .att img { max-width: 420px; border-radius:8px; border:1px solid rgba(255,255,255,.08); }
   </style>
 </head>
 <body>
@@ -52,18 +43,20 @@
       </div>
       <div class="cat">🐺・Chats</div>
       <div class="calendar">
-        <div id="dates" class="dates"></div>
+        <div id="date-list" class="dates"></div>
       </div>
     </aside>
 
     <main class="center">
       <div class="channel-header"><span id="channel-title"># chat-archive</span> <span class="muted" id="count"></span></div>
-      <div id="feed" class="feed"></div>
+      <div id="messages" class="feed"></div>
     </main>
   </div>
 
 <script>
-const $ = (sel) => document.querySelector(sel);
+const API_BASE = "https://discordchats-9ef6930e36f8.herokuapp.com";  // <-- your Heroku URL
+
+const $ = (s) => document.querySelector(s);
 
 function showError(msg) {
   const bar = document.createElement('div');
@@ -72,125 +65,79 @@ function showError(msg) {
   document.body.prepend(bar);
 }
 
-async function fetchJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) {
-    const text = await res.text().catch(()=> '');
-    throw new Error(`${url} → ${res.status}: ${text}`);
-  }
+async function fetchJSON(path) {
+  const res = await fetch(`${API_BASE}${path}`, { credentials: 'omit' });
+  if (!res.ok) throw new Error(`${path} → ${res.status}`);
   return res.json();
 }
 
-function gradientName(el, c1, c2) {
-  if (!c1 && !c2) { el.style.color = '#e74b4b'; return; }        // default red
-  if (c1 && !c2)   { el.style.color = c1; return; }              // single color
+function paintName(el, c1, c2) {
+  if (!c1 && !c2) { el.style.color = '#ed4245'; return; }
+  if (c1 && !c2) { el.style.color = c1; return; }
   el.style.backgroundImage = `linear-gradient(90deg, ${c1}, ${c2})`;
   el.style.webkitBackgroundClip = 'text';
   el.style.backgroundClip = 'text';
   el.style.color = 'transparent';
 }
 
-function msgRow(m) {
-  const row = document.createElement('div');
-  row.className = 'msg';
+function messageRow(m) {
+  const row = document.createElement('div'); row.className = 'row';
+  const av = document.createElement('img'); av.className = 'avatar';
+  av.src = m.avatar_url || 'https://cdn.discordapp.com/embed/avatars/0.png';
+  const body = document.createElement('div'); body.style.flex = '1';
 
-  const avatar = document.createElement('img');
-  avatar.className = 'avatar';
-  avatar.src = m.avatar_url || 'wolfpac.gif';
-  avatar.alt = '';
-
-  const body = document.createElement('div');
-  body.style.flex = '1';
-
-  const head = document.createElement('div');
-  head.className = 'header';
-
-  const name = document.createElement('span');
-  name.className = 'name';
-  name.textContent = m.display_name || 'Unknown';
-  gradientName(name, m.role_color_1, m.role_color_2);
-
-  const wolf = document.createElement('span');
-  wolf.className = 'wolf';
-  wolf.textContent = '🐺';
-
-  const time = document.createElement('span');
-  time.className = 'time';
-  time.textContent = m.time || '';
-
+  const head = document.createElement('div'); head.style.display='flex'; head.style.alignItems='center'; head.style.gap='8px';
+  const name = document.createElement('span'); name.className='name'; name.textContent = m.display_name || 'Unknown';
+  paintName(name, m.role_color_1, m.role_color_2);
+  const wolf = document.createElement('span'); wolf.textContent='🐺';
+  const time = document.createElement('span'); time.className='muted'; time.style.fontSize='12px'; time.textContent = m.ts_local_time || m.time || '';
   head.append(name, wolf, time);
 
-  const content = document.createElement('div');
-  content.className = 'content';
-  content.textContent = m.content || '';
+  const content = document.createElement('div'); content.className='content'; content.textContent = m.content || '';
 
-  const atWrap = document.createElement('div');
-  atWrap.className = 'att';
-  if (m.attachments && m.attachments.length) {
+  const attWrap = document.createElement('div'); attWrap.className='att';
+  if (Array.isArray(m.attachments)) {
     for (const a of m.attachments) {
-      if (!a.url) continue;
-      const img = document.createElement('img');
-      img.src = a.url;
-      img.alt = a.filename || '';
-      atWrap.append(img);
+      const src = a.s3_url || a.url || a.proxy_url;
+      if (!src) continue;
+      const img = document.createElement('img'); img.src = src; img.alt = a.filename || '';
+      attWrap.append(img);
     }
   }
 
-  body.append(head, content, atWrap);
-  row.append(avatar, body);
+  body.append(head, content, attWrap);
+  row.append(av, body);
   return row;
 }
 
 async function loadDates() {
   try {
-    const dates = await fetchJSON('/api/dates');
-    const list = $('#dates');             // <-- correct container
-    list.innerHTML = '';
-
-    if (!dates.length) {
-      list.innerHTML = '<div style="grid-column:1/-1;opacity:.7;padding:8px 12px">No dates found.</div>';
-      return;
-    }
+    const dates = await fetchJSON('/dates');
+    const list = $('#date-list'); list.innerHTML = '';
+    if (!dates.length) { list.innerHTML = '<div class="muted">No dates</div>'; return; }
 
     for (const d of dates) {
       const btn = document.createElement('button');
-      btn.className = 'date-btn';
-      btn.textContent = d.date;
-      btn.onclick = () => {
-        for (const b of list.querySelectorAll('.date-btn')) b.classList.remove('active');
-        btn.classList.add('active');
-        loadMessages(d.date);
-      };
+      btn.className = 'date-btn'; btn.textContent = d.ts_local_date || d.date || d;
+      btn.onclick = () => loadMessages(btn.textContent, btn);
       list.append(btn);
     }
-
-    // auto-select latest
-    const last = list.querySelector('.date-btn:last-child');
-    if (last) { last.classList.add('active'); loadMessages(last.textContent); }
-  } catch (e) {
-    console.error(e);
-    showError('Failed to load dates: ' + e.message);
-  }
+    // autoload last
+    const last = list.lastElementChild; if (last) last.click();
+  } catch(e){ console.error(e); showError('Failed to load dates.'); }
 }
 
-async function loadMessages(date) {
+async function loadMessages(dateStr, btnEl) {
   try {
-    $('#channel-title').textContent = `# chat-archive — ${date}`;
-    const feed = $('#feed');              // <-- correct container
-    feed.innerHTML = '';
+    $('#channel-title').textContent = `# chat-archive — ${dateStr}`;
+    if (btnEl) [...btnEl.parentNode.children].forEach(b=>b.classList.remove('active')), btnEl.classList.add('active');
 
-    const msgs = await fetchJSON('/api/messages?date=' + encodeURIComponent(date));
-    $('#count').textContent = msgs.length ? `(${msgs.length.toLocaleString()} messages)` : '';
-
-    if (!msgs.length) {
-      feed.innerHTML = '<div style="opacity:.7;padding:16px">No messages for this day.</div>';
-      return;
-    }
-    for (const m of msgs) feed.append(msgRow(m));
-  } catch (e) {
-    console.error(e);
-    showError('Failed to load messages: ' + e.message);
-  }
+    const msgs = await fetchJSON(`/messages?date_str=${encodeURIComponent(dateStr)}`);
+    const wrap = $('#messages'); wrap.innerHTML = '';
+    for (const m of msgs) wrap.append(messageRow(m));
+    $('#count').textContent = msgs.length ? `(${msgs.length.toLocaleString()} msgs)` : '(0 msgs)';
+    if (!msgs.length) wrap.innerHTML = '<div class="muted">No messages for this day.</div>';
+  } catch(e){ console.error(e); showError('Failed to load messages.'); }
 }
 
 window.addEventListener('DOMContentLoaded', loadDates);
