@@ -1,46 +1,59 @@
 import os
+import json
 import logging
-import boto3
-from typing import List, Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+
 import asyncpg
+import boto3
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from datetime import date as Date
 from urllib.parse import urlparse
 
+# ----------------------------
+# Config / Env
+# ----------------------------
 S3_ACCESS_KEY = os.getenv("STACKHERO_S3_ACCESS_KEY")
 S3_SECRET_KEY = os.getenv("STACKHERO_S3_SECRET_KEY")
 S3_BUCKET     = os.getenv("STACKHERO_S3_BUCKET")
 S3_ENDPOINT   = os.getenv("STACKHERO_S3_ENDPOINT")
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL missing")
 
 log = logging.getLogger("uvicorn.error")
 
-s3 = boto3.client(
-    "s3",
-    aws_access_key_id=S3_ACCESS_KEY,
-    aws_secret_access_key=S3_SECRET_KEY,
-    endpoint_url=f"https://{S3_ENDPOINT}",
-    region_name="us-east-1"  # or whatever Stackhero gives you
-)
-
-def presign_stackhero(key: str, expires_in: int = 86400) -> str:
-    """Return a temporary public URL to a private Stackhero S3 object."""
-    return s3.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": S3_BUCKET, "Key": key},
-        ExpiresIn=expires_in
+# S3 client is optional—only if creds/endpoint provided
+_s3_client = None
+if S3_ACCESS_KEY and S3_SECRET_KEY and S3_BUCKET and S3_ENDPOINT:
+    _s3_client = boto3.client(
+        "s3",
+        aws_access_key_id=S3_ACCESS_KEY,
+        aws_secret_access_key=S3_SECRET_KEY,
+        endpoint_url=f"https://{S3_ENDPOINT}",
+        region_name="us-east-1",
     )
 
-STACKHERO_HINTS = ("stackhero", ".s3.", ".object.", "amazonaws.com")  # loose check
+def presign_stackhero(key: str, expires_in: int = 86400) -> Optional[str]:
+    """Return a temporary public URL to a private Stackhero S3 object."""
+    if not _s3_client:
+        return None
+    try:
+        return _s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": key},
+            ExpiresIn=expires_in,
+        )
+    except Exception as e:
+        log.warning("presign failed for key %s: %s", key, e)
+        return None
+
+STACKHERO_HINTS = ("stackhero", ".s3.", ".object.", "amazonaws.com")
 
 def _extract_s3_key(u: str) -> Optional[str]:
-    """
-    Given a full S3/Stackhero URL, return the object key (path without leading '/').
-    """
+    """Given a full S3/Stackhero URL, return the object key (no leading '/')."""
     try:
         p = urlparse(u)
         key = p.path.lstrip("/")
@@ -48,61 +61,73 @@ def _extract_s3_key(u: str) -> Optional[str]:
     except Exception:
         return None
 
-def _presign_if_stackhero(u: Optional[str]) -> Optional[str]:
+def _maybe_presign_url(raw_url: Optional[str]) -> Optional[str]:
     """
-    If the URL points at your Stackhero/S3 bucket (or you just want to treat it like S3),
-    return a presigned URL. Otherwise return the original.
+    If a URL (or key) looks like S3/Stackhero (or is a bare key), return a presigned URL.
+    Else return the original value.
     """
-    if not u:
+    if not raw_url:
         return None
-    # Heuristic: presign if it looks like S3/Stackhero OR if it’s a bare key (no scheme).
-    if "://" not in u:
-        # looks like a key already
-        try:
-            return presign_stackhero(u)
-        except Exception:
-            return u
 
-    low = u.lower()
+    # Bare key (no scheme) → presign as key
+    if "://" not in raw_url:
+        return presign_stackhero(raw_url) or raw_url
+
+    low = raw_url.lower()
     if any(h in low for h in STACKHERO_HINTS):
-        key = _extract_s3_key(u)
+        key = _extract_s3_key(raw_url)
         if key:
-            try:
-                return presign_stackhero(key)
-            except Exception:
-                return u
-    return u
+            return presign_stackhero(key) or raw_url
 
-async def _table_exists(conn: asyncpg.Connection, name: str) -> bool:
-    row = await conn.fetchrow(
-        "SELECT to_regclass($1) IS NOT NULL AS exists", name
-    )
-    return bool(row["exists"])
+    return raw_url
 
-def _row_to_public(m: dict) -> dict:
-    # Normalize attachments shape (list of {url, filename, type, size})
-    atts = m.get("attachments") or []
-    # If you later store s3_key instead of url, presign here:
-    # for a in atts:
-    #     if a.get("s3_key") and not a.get("url"):
-    #         a["url"] = presign_stackhero(a["s3_key"])
-    return {
-        "message_id": str(m["message_id"]),
-        "display_name": m["display_name"],
-        "avatar_url": m.get("avatar_url"),
-        "role_color_1": m.get("role_color_1"),
-        "time": m.get("ts_local_time"),
-        "content": m.get("content"),
-        "attachments": atts,
-    }
+def _normalize_atts(atts: Any) -> List[Dict[str, Any]]:
+    """
+    Normalize attachments into: [{url, filename, type, size}]
+    Accepts:
+      - list of dicts       (our normal join)
+      - list of strings     (raw URLs)
+      - JSON string         (either of the above)
+      - None / empty
+    Also presigns Stackhero/S3 links/keys.
+    """
+    if not atts:
+        return []
 
+    # If DB returned a JSON string
+    if isinstance(atts, str):
+        try:
+            atts = json.loads(atts)
+        except Exception:
+            # Treat as a single URL string
+            return [{"url": _maybe_presign_url(atts)}]
 
+    out: List[Dict[str, Any]] = []
+    if isinstance(atts, list):
+        for a in atts:
+            if isinstance(a, str):
+                out.append({"url": _maybe_presign_url(a)})
+                continue
+            if isinstance(a, dict):
+                raw = a.get("s3_url") or a.get("url") or a.get("s3_key")
+                url = _maybe_presign_url(raw)
+                out.append({
+                    "url": url,
+                    "filename": a.get("filename"),
+                    "type": a.get("type") or a.get("content_type"),
+                    "size": a.get("size") or a.get("size_bytes"),
+                })
+    return out
+
+# ----------------------------
+# FastAPI app
+# ----------------------------
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://www.discordchats.com",   # your GitHub Pages domain
-        "https://discordchats.com"        # if you also use root domain
+        "https://www.discordchats.com",
+        "https://discordchats.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -111,17 +136,14 @@ app.add_middleware(
 
 _pool: Optional[asyncpg.Pool] = None
 
-
 @app.on_event("startup")
 async def _startup():
     global _pool
-    # Heroku PG often needs sslmode=require; if your URL doesn't include it,
-    # asyncpg still negotiates TLS, but we log the URL (without secrets) to be sure.
     safe_url = DATABASE_URL.split("@")[-1]
     log.info("DB: creating pool to %s", safe_url)
     _pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+
     async with _pool.acquire() as conn:
-        # sanity query
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS archived_messages (
             message_id      BIGINT PRIMARY KEY,
@@ -139,10 +161,8 @@ async def _startup():
         );
         """)
 
-
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "msg": "discordchats backend up"}
     try:
         async with _pool.acquire() as conn:
             row = await conn.fetchrow("""
@@ -151,12 +171,15 @@ async def health():
                        MAX(ts_local_date) AS max_date
                 FROM archived_messages
             """)
-        return dict(ok=True, count=row["n"], min_date=str(row["min_date"]) if row["min_date"] else None,
-                    max_date=str(row["max_date"]) if row["max_date"] else None)
+        return {
+            "ok": True,
+            "count": row["n"],
+            "min_date": str(row["min_date"]) if row["min_date"] else None,
+            "max_date": str(row["max_date"]) if row["max_date"] else None,
+        }
     except Exception as e:
         log.exception("/api/health failed: %s", e)
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
 
 @app.get("/api/dates")
 async def dates():
@@ -179,15 +202,14 @@ async def messages(
     date: str = Query(..., description="YYYY-MM-DD (local day)"),
     limit: int = Query(2000, ge=1, le=10000),
 ):
-    # 1) Validate & coerce incoming date string to a Python date
+    # Validate date
     try:
-        d = Date.fromisoformat(date)  # raises ValueError if bad
+        d = Date.fromisoformat(date)
     except ValueError:
         raise HTTPException(status_code=400, detail="Bad date; use YYYY-MM-DD")
 
     try:
         async with _pool.acquire() as conn:
-            # 2) Try with attachments (LEFT JOIN + JSON agg)
             try:
                 rows = await conn.fetch(
                     """
@@ -198,13 +220,14 @@ async def messages(
                         m.role_color_1,
                         m.role_color_2,
                         m.ts_local_time,
+                        m.ts_utc,
+                        m.channel_id,
                         m.content,
                         COALESCE(
                           json_agg(
                             json_build_object(
-                              -- include BOTH fields so we can decide at the API layer
-                              's3_url', a.s3_url,
-                              'url',     a.url,
+                              's3_url',   a.s3_url,
+                              'url',      a.url,
                               'filename', a.filename,
                               'type',     a.content_type,
                               'size',     a.size_bytes
@@ -233,6 +256,8 @@ async def messages(
                         m.role_color_1,
                         m.role_color_2,
                         m.ts_local_time,
+                        m.ts_utc,
+                        m.channel_id,
                         m.content
                     FROM archived_messages m
                     WHERE m.ts_local_date = $1
@@ -241,25 +266,12 @@ async def messages(
                     """,
                     d, limit
                 )
-                # normalize to same shape
-                rows = [dict(r) | {"attachments": []} for r in rows]
 
+        # Convert to plain dicts and normalize attachments
         out = []
-        for r in rows:
-            atts_in = r.get("attachments") or []
-            atts_out = []
-            for a in atts_in:
-                # Prefer s3_url if present; else url.
-                raw = a.get("s3_url") or a.get("url")
-                signed = _presign_if_stackhero(raw)
-
-                atts_out.append({
-                    "url": signed,
-                    "filename": a.get("filename"),
-                    "type": a.get("type"),
-                    "size": a.get("size"),
-                })
-
+        for rec in rows:
+            r = dict(rec)
+            atts = _normalize_atts(r.get("attachments"))
             out.append({
                 "message_id": str(r["message_id"]),
                 "display_name": r["display_name"],
@@ -268,12 +280,10 @@ async def messages(
                 "role_color_2": r.get("role_color_2"),
                 "time": r.get("ts_local_time"),
                 "content": r.get("content"),
-                "attachments": atts_out,
+                "attachments": atts,
             })
-
         return out
 
     except Exception as e:
         log.exception("/api/messages failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
-
