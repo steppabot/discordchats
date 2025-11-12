@@ -72,13 +72,18 @@ async function fetchJSON(path) {
   return res.json();
 }
 
-function paintName(el, c1, c2) {
-  if (!c1 && !c2) { el.style.color = '#ed4245'; return; }
-  if (c1 && !c2) { el.style.color = c1; return; }
-  el.style.backgroundImage = `linear-gradient(90deg, ${c1}, ${c2})`;
-  el.style.webkitBackgroundClip = 'text';
-  el.style.backgroundClip = 'text';
-  el.style.color = 'transparent';
+function paintName(el, c1) {
+  // default Discord red
+  let color = '#ed4245';
+  if (c1 && typeof c1 === 'string') {
+    const s = c1.trim();
+    if (/^#(?:[0-9a-f]{3}){1,2}$/i.test(s)) color = s;
+  }
+  // ensure no gradient leftovers
+  el.style.backgroundImage = '';
+  el.style.webkitBackgroundClip = '';
+  el.style.backgroundClip = '';
+  el.style.color = color;
 }
 
 function messageRow(m) {
