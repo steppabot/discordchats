@@ -5,6 +5,7 @@ import asyncpg
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from datetime import date as Date
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
@@ -95,9 +96,15 @@ async def messages(
     date: str = Query(..., description="YYYY-MM-DD (local day)"),
     limit: int = Query(2000, ge=1, le=10000),
 ):
+    # 1) Validate & coerce incoming date string to a Python date
+    try:
+        d = Date.fromisoformat(date)  # raises ValueError if bad
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Bad date; use YYYY-MM-DD")
+
     try:
         async with _pool.acquire() as conn:
-            # First try: include attachments via LEFT JOIN + JSON aggregation
+            # 2) Try with attachments (LEFT JOIN + JSON agg)
             try:
                 rows = await conn.fetch(
                     """
@@ -123,15 +130,14 @@ async def messages(
                     FROM archived_messages m
                     LEFT JOIN archived_attachments a
                       ON a.message_id = m.message_id
-                    WHERE m.ts_local_date = $1::date
+                    WHERE m.ts_local_date = $1
                     GROUP BY m.message_id
                     ORDER BY m.ts_local_time ASC, m.message_id ASC
                     LIMIT $2
                     """,
-                    date, limit
+                    d, limit  # <— pass the Python date, no ::date cast in SQL
                 )
             except Exception as join_err:
-                # Table missing or schema mismatch: fall back to messages only.
                 log.warning("Attachments join skipped: %s", join_err)
                 rows = await conn.fetch(
                     """
@@ -144,32 +150,24 @@ async def messages(
                         m.ts_local_time,
                         m.content
                     FROM archived_messages m
-                    WHERE m.ts_local_date = $1::date
+                    WHERE m.ts_local_date = $1
                     ORDER BY m.ts_local_time ASC, m.message_id ASC
                     LIMIT $2
                     """,
-                    date, limit
+                    d, limit
                 )
-                # Normalize to include empty attachments list so the UI code stays simple.
-                rows = [
-                    dict(r) | {"attachments": []}
-                    for r in rows
-                ]
+                rows = [dict(r) | {"attachments": []} for r in rows]
 
-        # asyncpg Record -> plain dicts
-        out = []
-        for r in rows:
-            out.append({
-                "message_id": str(r["message_id"]),
-                "display_name": r["display_name"],
-                "avatar_url": r.get("avatar_url"),
-                "role_color_1": r.get("role_color_1"),
-                "role_color_2": r.get("role_color_2"),
-                "time": r.get("ts_local_time"),
-                "content": r.get("content"),
-                "attachments": r.get("attachments") or [],
-            })
-        return out
+        return [{
+            "message_id": str(r["message_id"]),
+            "display_name": r["display_name"],
+            "avatar_url": r.get("avatar_url"),
+            "role_color_1": r.get("role_color_1"),
+            "role_color_2": r.get("role_color_2"),
+            "time": r.get("ts_local_time"),
+            "content": r.get("content"),
+            "attachments": r.get("attachments") or [],
+        } for r in rows]
 
     except Exception as e:
         log.exception("/api/messages failed: %s", e)
