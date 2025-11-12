@@ -1,7 +1,6 @@
 import os
 import logging
 from typing import List, Optional, Dict, Any
-
 import asyncpg
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -16,7 +15,10 @@ log = logging.getLogger("uvicorn.error")
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # your site is same-origin, but this avoids CORS surprises
+    allow_origins=[
+        "https://www.discordchats.com",   # your GitHub Pages domain
+        "https://discordchats.com"        # if you also use root domain
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,7 +57,7 @@ async def _startup():
 
 @app.get("/api/health")
 async def health():
-    """Quick visibility: how many rows and earliest/latest date."""
+    return {"ok": True, "msg": "discordchats backend up"}
     try:
         async with _pool.acquire() as conn:
             row = await conn.fetchrow("""
