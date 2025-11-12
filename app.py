@@ -132,10 +132,10 @@ async def messages(
                       ON a.message_id = m.message_id
                     WHERE m.ts_local_date = $1
                     GROUP BY m.message_id
-                    ORDER BY m.ts_local_time ASC, m.message_id ASC
+                    ORDER BY m.ts_utc ASC, m.message_id ASC
                     LIMIT $2
                     """,
-                    d, limit  # <— pass the Python date, no ::date cast in SQL
+                    d, limit
                 )
             except Exception as join_err:
                 log.warning("Attachments join skipped: %s", join_err)
@@ -151,7 +151,7 @@ async def messages(
                         m.content
                     FROM archived_messages m
                     WHERE m.ts_local_date = $1
-                    ORDER BY m.ts_local_time ASC, m.message_id ASC
+                    ORDER BY m.ts_utc ASC, m.message_id ASC
                     LIMIT $2
                     """,
                     d, limit
