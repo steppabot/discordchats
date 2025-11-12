@@ -6,33 +6,27 @@
   <title>DiscordChats — Wolfpac</title>
   <style>
     :root { --bg:#202225; --bg-2:#2f3136; --bg-3:#36393f; --text:#e5e7eb; --muted:#a3a6aa; --accent:#ed4245; --brand:#7289da; }
+    html { -webkit-text-size-adjust: 100%; } /* prevent Safari auto-zoom shenanigans */
     * { box-sizing:border-box }
-    html, body { height:100%; }
     body { margin:0; background:var(--bg-3); color:var(--text); font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial }
 
-    /* ====== LAYOUT ====== */
+    /* ===== LAYOUT ===== */
     .layout {
-      display: grid;
+      display:grid;
       grid-template-columns: 380px 1fr;
-      height: 100vh; /* desktop: full height */
-      width: 100%;
+      height: 100vh;
     }
     .left {
       background: var(--bg-2);
       border-right: 1px solid #1f2024;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .center {
       display:flex;
       flex-direction:column;
-      min-height:0; /* allow children to shrink so feed remains visible */
+      overflow:hidden;
     }
-    .channel-header { padding:12px 16px; background:var(--bg-2); border-bottom:1px solid #1f2024; display:flex; align-items:center; gap:10px; font-weight:700 }
-    .feed { padding:14px 16px; overflow:auto; flex:1; min-height:0; }
+    .center { display:flex; flex-direction:column; height:100vh; min-width:0; }
+    .feed { padding:14px 16px; overflow:auto; }
 
-    /* ====== LEFT SIDE ====== */
+    /* ===== GUILD HEADER ===== */
     .guild{
       position: relative;
       height: 120px;
@@ -48,38 +42,64 @@
     }
     .guild h1{
       position:absolute; left:16px; bottom:12px;
-      margin:0;
-      font-size:22px; font-weight:800; letter-spacing:.4px;
-      color:#fff; display:flex; align-items:center; gap:8px;
+      margin:0; font-size:22px; font-weight:800; letter-spacing:.4px; color:#fff;
+      display:flex; align-items:center; gap:8px;
       text-shadow: 0 2px 6px rgba(0,0,0,.65), 0 0 12px rgba(0,0,0,.35);
     }
     .guild h1 .wolf{ filter: drop-shadow(0 2px 4px rgba(0,0,0,.5)); transform: translateY(-1px); }
+
     .cat { padding:10px 12px; font-weight:700; color:#cdd0d4; letter-spacing:.3px }
 
-    .calendar { padding: 10px 10px 14px; overflow-y: auto; overflow-x: hidden; }
+    .channel-header { padding:12px 16px; background:var(--bg-2); border-bottom:1px solid #1f2024; display:flex; align-items:center; gap:10px; font-weight:700 }
+    .muted { color:var(--muted) }
+
+    .row { display:flex; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.04) }
+    .avatar { width:44px; height:44px; border-radius:50%; object-fit:cover; background:#111 }
+    .name { font-weight:700 }
+    .content { white-space:pre-wrap; margin-top:4px }
+    .att { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px }
+    .att img { max-width:420px; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
+
+    /* ===== LEFT PANEL CONTENT ===== */
+    .calendar { padding: 10px 10px 14px; overflow-y:auto; overflow-x:hidden; }
     .cal { background:#26282d; border:1px solid #1b1c20; border-radius:10px; width:100%; }
 
-    /* Header: no giant gap, stays one line on desktop, wraps nicely on small screens */
+    /* Calendar header: make it a single flow: Prev • Month • Year • Next */
     .cal-head{
       display:flex;
       align-items:center;
-      gap:8px;
+      gap:8px;              /* small, consistent spacing – no giant gap */
       padding:8px;
       border-bottom:1px solid #1b1c20;
-      flex-wrap:wrap;
+      flex-wrap:wrap;       /* allows tidy wrap only when truly needed */
     }
-    .cal-side{ display:flex; align-items:center; gap:8px; }
-    .cal-left{ flex:0 1 auto; }
-    .cal-right{ margin-left:auto; flex:0 1 auto; display:flex; align-items:center; gap:8px; }
+    /* flatten the two groups so their children are direct flex items */
+    .cal-left, .cal-right { display: contents; }
 
-    .cal-head button,
-    .cal-head select{
+    .cal-head button{
       background:#1f2024; color:#d6d8dd; border:1px solid #16171a;
       border-radius:6px; padding:6px 10px; cursor:pointer; white-space:nowrap;
     }
+    .cal-head select{
+      background:#1f2024; color:#d6d8dd; border:1px solid #16171a;
+      border-radius:6px; padding:6px 10px; white-space:nowrap;
+    }
 
-    .cal-week { display:grid; grid-template-columns:repeat(7,1fr); padding:6px 8px; color:#b7bac0; font-size:12px; letter-spacing:.3px; }
-    .cal-grid { display:grid; grid-template-columns:repeat(7, minmax(0,1fr)); gap:6px; padding:0 8px 10px 8px; }
+    /* sane widths to avoid wrapping on desktop and huge gap */
+    #month{ min-width: 124px; }
+    #year { width: 92px; }
+
+    .cal-week {
+      display:grid;
+      grid-template-columns: repeat(7, 1fr);
+      padding: 6px 8px;
+      color:#b7bac0; font-size:12px; letter-spacing:.3px;
+    }
+    .cal-grid {
+      display:grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap:6px; padding:0 8px 10px 8px;
+    }
     .day { position:relative; aspect-ratio:1/1; border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:600; border:1px solid #1b1c20; background:#202226; color:#d5d8dc }
     .day.muted { opacity:.45 }
     .day.has { cursor:pointer; background:#23262b }
@@ -96,39 +116,40 @@
       border-radius: 10px;
     }
     .search-title{
-      font-weight: 800; letter-spacing: .3px; margin-bottom: 8px;
+      font-weight:800; letter-spacing:.3px; margin-bottom:8px;
       display:flex; align-items:center; gap:6px;
     }
+    .search .glass{ filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
     #search-form{ display:block }
     #search-input{
-      width: 100%;
+      width:100%;
       background:#1f2024; color:#e8eaed;
       border:1px solid #16171a; border-radius:8px; padding:10px 12px;
       outline:none;
+      font-size:16px; /* >=16px prevents iOS input zoom */
+      line-height:1.4;
     }
     #search-input::placeholder{ color:#9aa0a6 }
     .hl{ background:#5f5345; color:#fff; border-radius:4px; padding:0 2px; }
 
-    .row { display:flex; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.04) }
-    .avatar { width:44px; height:44px; border-radius:50%; object-fit:cover; background:#111 }
-    .name { font-weight:700 }
-    .content { white-space:pre-wrap; margin-top:4px }
-    .att { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px }
-    .att img { max-width:420px; width:100%; height:auto; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
-    .muted { color:var(--muted) }
-
-    /* ====== MOBILE STACK ====== */
-    @media (max-width: 1024px){
+    /* ===== MOBILE ===== */
+    @media (max-width: 980px){
       .layout{
-        grid-template-columns: 1fr;   /* stack left above center */
-        height: 100%;                 /* allow page to grow */
+        grid-template-columns: 1fr;        /* stack */
+        grid-auto-rows: min-content auto;  /* left grows to fit */
+        height: 100dvh;
       }
-      .left{ border-right:none; border-bottom:1px solid #1f2024; }
-      .center{ min-height: calc(100vh - 0px); }
+      .left{
+        border-right:none;
+      }
+      .calendar, .search{ padding-left:12px; padding-right:12px; }
+      .center{ height:auto; min-height: 50dvh; }
       .feed{ padding:12px; }
-      .avatar { width:38px; height:38px; }
-      .cal-head{ gap:10px; }
-      .cal-right{ margin-left:auto; } /* still pushes year/next to the right edge */
+
+      /* keep header controls tidy on narrow screens */
+      .cal-head{ gap:6px; }
+      #month{ min-width: 120px; }
+      #year { width: 88px; }
     }
   </style>
 </head>
@@ -143,12 +164,12 @@
       <div class="calendar">
         <div class="cal">
           <div class="cal-head">
-            <div class="cal-side cal-left">
+            <div class="cal-left">
               <button id="prev">Prev</button>
-              <select id="month" aria-label="Month"></select>
+              <select id="month"></select>
             </div>
-            <div class="cal-side cal-right">
-              <select id="year" aria-label="Year"></select>
+            <div class="cal-right">
+              <select id="year"></select>
               <button id="next">Next</button>
             </div>
           </div>
@@ -232,7 +253,7 @@ function messageRow(m) {
   return row;
 }
 
-/* ===== Calendar state ===== */
+/* ===== Calendar / Dates ===== */
 let avail = new Map();
 let months = new Set();
 let curY, curM;
@@ -268,9 +289,7 @@ function renderCalendar() {
     const date = new Date(curY, curM-1, d);
     cells.push({date, inMonth:false});
   }
-  for (let d=1; d<=daysInMonth; d++) {
-    cells.push({date:new Date(curY, curM, d), inMonth:true});
-  }
+  for (let d=1; d<=daysInMonth; d++) cells.push({date:new Date(curY, curM, d), inMonth:true});
   while (cells.length < totalCells) {
     const idx = cells.length - (prevDays + daysInMonth) + 1;
     cells.push({date:new Date(curY, curM+1, idx), inMonth:false});
@@ -294,8 +313,6 @@ function renderCalendar() {
         [...grid.children].forEach(el => el.classList.remove('selected'));
         day.classList.add('selected');
         await loadMessages(key);
-        // scroll main back to top of feed after changing date (useful on mobile)
-        document.getElementById('messages').scrollTop = 0;
       });
       if (selectedDay === key) day.classList.add('selected');
     }
@@ -317,7 +334,7 @@ $('#year').addEventListener('change', e => { curY = +e.target.value; renderCalen
 
 async function loadDates() {
   try {
-    const dates = await fetchJSON('/dates');
+    const dates = await fetchJSON('/dates');   // [{date, count}]
     avail.clear(); months.clear();
     for (const d of dates) {
       const day = d.date || d.ts_local_date || d;
@@ -434,8 +451,6 @@ async function doSearch(e){
     document.getElementById('count').textContent =
       rows.length ? `(${rows.length.toLocaleString()} results)` : '(0 results)';
     document.getElementById('search-hint').textContent = rows.length ? '' : 'No matches.';
-    // jump feed to top so results are immediately visible on mobile
-    wrap.scrollTop = 0;
   } catch (err) {
     console.error(err);
     banner('Search failed.', false);
@@ -443,18 +458,13 @@ async function doSearch(e){
   }
 }
 
-/* boot */
 window.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('search-form');
-  if (form) {
-    form.setAttribute('action', 'javascript:void(0)');
-    form.noValidate = true;
-    form.addEventListener('submit', doSearch);
-  }
+  form.addEventListener('submit', doSearch);
+
   const input = document.getElementById('search-input');
-  if (input) {
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(e); });
-  }
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(e); });
+
   loadDates();
 });
 </script>
