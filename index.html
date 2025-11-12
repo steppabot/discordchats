@@ -2,158 +2,120 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <!-- prevent iOS zoom shenanigans -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>DiscordChats — Wolfpac</title>
   <style>
     :root { --bg:#202225; --bg-2:#2f3136; --bg-3:#36393f; --text:#e5e7eb; --muted:#a3a6aa; --accent:#ed4245; --brand:#7289da; }
     * { box-sizing:border-box }
-    html, body { height:100%; }
-    body { margin:0; background:var(--bg-3); color:var(--text); font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; overflow-x:hidden; }
-
-    .layout {
-      display:grid;
-      grid-template-columns: 380px 1fr;
-      height:100vh;
+    html, body { height:100% }
+    body {
+      margin:0; background:var(--bg-3); color:var(--text);
+      font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      -webkit-text-size-adjust: 100%;
+      overflow-x: hidden;  /* never allow sideways scroll */
     }
 
-    .left {
-      background:var(--bg-2);
-      border-right:1px solid #1f2024;
-      display:flex;
-      flex-direction:column;
-      overflow:hidden;
-    }
+    /* ===== LAYOUT ===== */
+    .layout { display:grid; grid-template-columns:380px 1fr; height:100vh }
+    .left { background:var(--bg-2); border-right:1px solid #1f2024; display:flex; flex-direction:column; overflow:auto }
+    .center { display:flex; flex-direction:column; height:100vh }
 
-    .guild{
-      position:relative;
-      height:120px;
-      padding:0;
-      background:url("wolfpac.gif") center/cover no-repeat;
-      border-bottom:1px solid #1f2024;
-      overflow:hidden;
-    }
-    .guild::before{ content:""; position:absolute; inset:0; background:linear-gradient(0deg, rgba(0,0,0,.60), rgba(0,0,0,.35)); }
-    .guild h1{
-      position:absolute; left:16px; bottom:12px; margin:0;
-      font-size:22px; font-weight:800; letter-spacing:.4px; color:#fff;
-      display:flex; align-items:center; gap:8px;
-      text-shadow:0 2px 6px rgba(0,0,0,.65), 0 0 12px rgba(0,0,0,.35);
-    }
-    .guild h1 .wolf{ filter: drop-shadow(0 2px 4px rgba(0,0,0,.5)); transform: translateY(-1px); }
-    .cat { padding:10px 12px; font-weight:700; color:#cdd0d4; letter-spacing:.3px }
+    .guild{ position:relative; height:120px; background:url("wolfpac.gif") center/cover no-repeat; border-bottom:1px solid #1f2024; overflow:hidden }
+    .guild::before{ content:""; position:absolute; inset:0; background:linear-gradient(0deg, rgba(0,0,0,.60), rgba(0,0,0,.35)) }
+    .guild h1{ position:absolute; left:16px; bottom:12px; margin:0; font-size:22px; font-weight:800; letter-spacing:.4px; color:#fff; display:flex; gap:8px;
+      text-shadow:0 2px 6px rgba(0,0,0,.65), 0 0 12px rgba(0,0,0,.35) }
+    .guild .wolf{ filter:drop-shadow(0 2px 4px rgba(0,0,0,.5)) }
 
-    .center { display:flex; flex-direction:column; height:100vh; }
-    .channel-header { padding:12px 16px; background:var(--bg-2); border-bottom:1px solid #1f2024; display:flex; align-items:center; gap:10px; font-weight:700 }
-    .muted { color:var(--muted) }
+    .cat{ padding:10px 12px; font-weight:700; color:#cdd0d4; letter-spacing:.3px }
 
-    .feed { padding:14px 16px; overflow:auto; overflow-x:hidden; }
+    .channel-header{ padding:12px 16px; background:var(--bg-2); border-bottom:1px solid #1f2024; display:flex; gap:10px; font-weight:700 }
+    .muted{ color:var(--muted) }
 
-    .row { display:flex; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.04) }
-    .avatar { width:44px; height:44px; border-radius:50%; object-fit:cover; background:#111 }
-    .name { font-weight:700 }
-    .content { white-space:pre-wrap; margin-top:4px }
-    .att { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; overflow:hidden; }
-    .att img { max-width:420px; border-radius:8px; border:1px solid rgba(255,255,255,.08); height:auto; display:block; }
+    .feed{ padding:14px 16px; overflow:auto }
+    .row{ display:flex; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.04) }
+    .avatar{ width:44px; height:44px; border-radius:50%; object-fit:cover; background:#111 }
+    .name{ font-weight:700 }
+    .content{ white-space:pre-wrap; margin-top:4px }
+    .att{ margin-top:8px; display:flex; flex-wrap:wrap; gap:8px }
+    .att img{ max-width:420px; height:auto; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
 
-    /* Controls wrapper (calendar + search) */
-    .controls { padding:10px 10px 14px; overflow-y:auto; overflow-x:hidden; }
-    .hamburger {
-      display:none;
-      background:#1f2024; color:#e8eaed; border:1px solid #16171a;
-      border-radius:10px; padding:10px 12px; margin:10px; width:calc(100% - 20px);
-      font-weight:800; letter-spacing:.3px; cursor:pointer;
-    }
-    .drawer { transition:max-height .28s ease; max-height:9999px; overflow:hidden; }
-    .drawer.collapsed { max-height:0; }
+    .calendar{ padding:10px 10px 14px; overflow:visible }
+    .cal{ background:#26282d; border:1px solid #1b1c20; border-radius:10px; width:100% }
+    .cal-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px; border-bottom:1px solid #1b1c20 }
+    .cal-side{ display:flex; align-items:center; gap:8px; flex-wrap:nowrap }
 
-    /* Calendar card */
-    .cal { background:#26282d; border:1px solid #1b1c20; border-radius:10px; width:100%; }
-    .cal-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px; border-bottom:1px solid #1b1c20; flex-wrap:nowrap; }
-    .cal-side{ display:flex; align-items:center; gap:8px; flex:0 0 auto; }
-    .cal-head button{
-      background:#1f2024; color:#d6d8dd; border:1px solid #16171a;
-      border-radius:6px; padding:6px 10px; cursor:pointer; white-space:nowrap;
-    }
+    .cal-head button,
     .cal-head select{
-      background:#1f2024; color:#d6d8dd; border:1px solid #16171a;
-      border-radius:6px; padding:6px 10px; white-space:nowrap;
+      background:#1f2024; color:#d6d8dd; border:1px solid #16171a; border-radius:6px; padding:8px 12px; white-space:nowrap;
+      /* KEY: >=16px stops iOS focus-zoom */
+      font-size:16px;
     }
-    .cal-week{ display:grid; grid-template-columns:repeat(7,1fr); padding:6px 8px; color:#b7bac0; font-size:12px; letter-spacing:.3px; }
-    .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; padding:0 8px 10px 8px; }
+
+    .cal-week{ display:grid; grid-template-columns:repeat(7,1fr); padding:6px 8px; color:#b7bac0; font-size:12px; letter-spacing:.3px }
+    .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; padding:0 8px 10px 8px }
     .day{ position:relative; aspect-ratio:1/1; border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:600; border:1px solid #1b1c20; background:#202226; color:#d5d8dc }
     .day.muted{ opacity:.45 }
     .day.has{ cursor:pointer; background:#23262b }
     .day.has:hover{ outline:2px solid #3a4a84 }
-    .day.selected{ outline:2px solid var(--brand); box-shadow:0 0 0 2px rgba(114,137,218,.25) inset; }
+    .day.selected{ outline:2px solid var(--brand); box-shadow:0 0 0 2px rgba(114,137,218,.25) inset }
     .dot{ position:absolute; bottom:6px; right:6px; width:8px; height:8px; border-radius:50%; background:#4ade80 }
     .count{ position:absolute; top:6px; right:6px; font-size:10px; color:#aeb4ba }
 
-    .search-card{
-      margin: 14px 0 0;
-      padding: 12px;
-      background: #26282d;
-      border: 1px solid #1b1c20;
-      border-radius: 10px;
-    }
-    .search-title{ font-weight:800; letter-spacing:.3px; margin-bottom:8px; display:flex; align-items:center; gap:6px; }
-    .search .glass{ filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
+    .search{ margin:14px 10px; padding:12px; background:#26282d; border:1px solid #1b1c20; border-radius:10px }
+    .search-title{ font-weight:800; letter-spacing:.3px; margin-bottom:8px; display:flex; align-items:center; gap:6px }
+    .search .glass{ filter:drop-shadow(0 1px 2px rgba(0,0,0,.35)) }
     #search-form{ display:block }
     #search-input{
-      width:100%;
-      background:#1f2024; color:#e8eaed;
-      border:1px solid #16171a; border-radius:8px; padding:10px 12px;
-      outline:none;
+      width:100%; background:#1f2024; color:#e8eaed; border:1px solid #16171a; border-radius:8px; padding:12px 14px; outline:none;
+      font-size:16px; /* stop iOS zoom on focus */
     }
     #search-input::placeholder{ color:#9aa0a6 }
-    .hl{ background:#5f5345; color:#fff; border-radius:4px; padding:0 2px; }
+    .hl{ background:#5f5345; color:#fff; border-radius:4px; padding:0 2px }
 
-    #month{ min-width:140px; }
-    #year{ width:88px; }
+    /* Burger + collapsible on mobile */
+    .burger-wrap{ display:none; padding:10px 16px }
+    .burger{ width:100%; background:#26282d; color:#e8eaed; border:1px solid #1b1c20; border-radius:10px; padding:10px 0; font-weight:700; font-size:16px }
 
-    /* =========================
-       Mobile (stack + clamp)
-       ========================= */
-    @media (max-width: 900px){
-      .layout{ grid-template-columns: 1fr; height:auto; min-height:100vh; }
-      .left{ border-right:none; }
-      .hamburger{ display:block; }
-      .controls{ padding:0 10px 14px; }
-      .center{ height:auto; }
-      .feed{ height:auto; }
-
-      /* Prevent iOS zoom on focus */
-      #search-input{ font-size:16px; }
-
-      /* Clamp images to viewport width, keep desktop behavior unchanged */
-      .att img{ max-width:100%; height:auto; }
+    /* Mobile rules */
+    @media (max-width: 860px){
+      .layout{ grid-template-columns:1fr; height:auto; min-height:100vh }
+      .left{ border-right:none }
+      .burger-wrap{ display:block }
+      .left-inner{ overflow:hidden; transition:max-height .25s ease }
+      .left-inner.collapsed{ max-height:0 }
+      .left-inner.open{ max-height:1200px } /* big enough to show calendar+search */
+      /* clamp images fully on mobile — avoid sideways scroll */
+      .att img{ max-width:100% }
     }
+
+    /* Just a little safety for any other controls */
+    button, input, select, textarea { font-size:16px; }
   </style>
 </head>
 <body>
   <div class="layout">
     <aside class="left">
-      <div class="guild">
-        <h1><span class="wolf">🐺</span> Wolfpac</h1>
-      </div>
-
+      <div class="guild"><h1><span class="wolf">🐺</span> Wolfpac</h1></div>
       <div class="cat">🐺・Chats</div>
 
-      <!-- Mobile toggle -->
-      <button id="toggle-controls" class="hamburger" aria-expanded="true" aria-controls="drawer">☰ Menu</button>
+      <!-- Burger (mobile) -->
+      <div class="burger-wrap">
+        <button id="burger" class="burger">≡ Menu</button>
+      </div>
 
-      <!-- Drawer: calendar + search -->
-      <section id="drawer" class="drawer">
-        <div class="controls">
-          <!-- Calendar -->
+      <!-- Collapsible contents -->
+      <div id="leftInner" class="left-inner open">
+        <div class="calendar">
           <div class="cal">
             <div class="cal-head">
               <div class="cal-side cal-left">
-                <button id="prev">Prev</button>
-                <select id="month"></select>
+                <button id="prev" type="button">Prev</button>
+                <select id="month" aria-label="Month"></select>
               </div>
               <div class="cal-side cal-right">
-                <select id="year"></select>
-                <button id="next">Next</button>
+                <select id="year" aria-label="Year"></select>
+                <button id="next" type="button">Next</button>
               </div>
             </div>
             <div class="cal-week">
@@ -161,17 +123,16 @@
             </div>
             <div id="cal-grid" class="cal-grid"></div>
           </div>
-
-          <!-- Search -->
-          <div class="search-card">
-            <div class="search-title">Search <span class="glass">🔍</span></div>
-            <form id="search-form" action="javascript:;" novalidate autocomplete="off">
-              <input id="search-input" type="text" placeholder="Find messages…" />
-            </form>
-            <div id="search-hint" class="muted" style="margin-top:6px; font-size:12px;"></div>
-          </div>
         </div>
-      </section>
+
+        <div class="search">
+          <div class="search-title">Search <span class="glass">🔍</span></div>
+          <form id="search-form" action="javascript:;" novalidate autocomplete="off">
+            <input id="search-input" inputmode="search" autocapitalize="off" spellcheck="false" type="text" placeholder="Find messages…" />
+          </form>
+          <div id="search-hint" class="muted" style="margin-top:6px;font-size:12px;"></div>
+        </div>
+      </div>
     </aside>
 
     <main class="center">
@@ -187,21 +148,20 @@ const $ = (s) => document.querySelector(s);
 /* banners */
 function banner(msg, ok=true){
   const bar = document.createElement('div');
-  bar.style.cssText = `background:${ok?'#165c2e':'#8b1d1d'};color:#fff;padding:10px 14px;font:14px/1.3 system-ui,Segoe UI,Roboto;border-bottom:1px solid #0003`;
+  bar.style.cssText = `background:${ok?'#165c2e':'#8b1d1d'};color:#fff;padding:10px 14px;font:14px/1.3 system-ui,Segoe UI,Roboto;border-bottom:1px solid #0003;position:sticky;top:0;z-index:50`;
   bar.textContent = msg;
   document.body.prepend(bar);
 }
 
-async function fetchJSON(path) {
-  const url = `${API_BASE}${path}`;
-  const res = await fetch(url, {credentials:'omit'});
-  if (!res.ok) throw new Error(`${url} → ${res.status}`);
+async function fetchJSON(path){
+  const res = await fetch(`${API_BASE}${path}`, { credentials:'omit' });
+  if (!res.ok) throw new Error(`${path} → ${res.status}`);
   return res.json();
 }
 
-function paintName(el, c1) {
+function paintName(el, c1){
   let color = '#ed4245';
-  if (c1 && typeof c1 === 'string') {
+  if (c1 && typeof c1 === 'string'){
     const s = c1.trim();
     if (/^#(?:[0-9a-f]{3}){1,2}$/i.test(s)) color = s;
   }
@@ -209,7 +169,7 @@ function paintName(el, c1) {
   el.style.color = color;
 }
 
-function messageRow(m) {
+function messageRow(m){
   const row = document.createElement('div'); row.className='row';
   const av = document.createElement('img'); av.className='avatar';
   av.src = m.avatar_url || 'https://cdn.discordapp.com/embed/avatars/0.png';
@@ -219,32 +179,33 @@ function messageRow(m) {
   const name = document.createElement('span'); name.className='name'; name.textContent = m.display_name || 'Unknown';
   paintName(name, m.role_color_1);
   const wolf = document.createElement('span'); wolf.textContent='🐺';
-  const time = document.createElement('span'); time.className='muted'; time.style.fontSize='12px'; time.textContent = m.time || m.ts_local_time || '';
+  const time = document.createElement('span'); time.className='muted'; time.style.fontSize='12px';
+  time.textContent = m.time || m.ts_local_time || '';
   head.append(name, wolf, time);
 
   const content = document.createElement('div'); content.className='content'; content.textContent = m.content || '';
 
   const attWrap = document.createElement('div'); attWrap.className='att';
-  if (Array.isArray(m.attachments)) {
-    for (const a of m.attachments) {
-      const src = a.url; if (!src) continue;
+  if (Array.isArray(m.attachments)){
+    for (const a of m.attachments){
+      const src = a.url || a.s3_url; if (!src) continue;
       const img = document.createElement('img'); img.src = src; img.alt = a.filename || '';
       attWrap.append(img);
     }
   }
+
   body.append(head, content, attWrap);
   row.append(av, body);
   return row;
 }
 
-/* Calendar state */
+/* ========= Calendar ========= */
 let avail = new Map();
 let months = new Set();
 let curY, curM;
 let selectedDay = null;
 
-/* Fill month/year */
-function fillMonthYearRanges() {
+function fillMonthYearRanges(){
   const mo = $('#month'), yr = $('#year');
   const names = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   mo.innerHTML = names.map((n,i)=>`<option value="${i}">${n}</option>`).join('');
@@ -255,10 +216,9 @@ function fillMonthYearRanges() {
   yr.innerHTML = yopt;
 }
 
-/* Render calendar */
-function renderCalendar() {
+function renderCalendar(){
   $('#month').value = String(curM);
-  $('#year').value = String(curY);
+  $('#year').value  = String(curY);
 
   const grid = $('#cal-grid'); grid.innerHTML = '';
   const first = new Date(curY, curM, 1);
@@ -270,18 +230,17 @@ function renderCalendar() {
   const prevMonthDays = new Date(curY, curM, 0).getDate();
 
   const cells = [];
-  for (let i=prevDays-1; i>=0; i--) {
+  for (let i=prevDays-1; i>=0; i--){
     const d = prevMonthDays - i;
-    const date = new Date(curY, curM-1, d);
-    cells.push({date, inMonth:false});
+    cells.push({date:new Date(curY, curM-1, d), inMonth:false});
   }
   for (let d=1; d<=daysInMonth; d++) cells.push({date:new Date(curY, curM, d), inMonth:true});
-  while (cells.length < totalCells) {
+  while (cells.length < totalCells){
     const idx = cells.length - (prevDays + daysInMonth) + 1;
     cells.push({date:new Date(curY, curM+1, idx), inMonth:false});
   }
 
-  for (const c of cells) {
+  for (const c of cells){
     const yyyy = c.date.getFullYear();
     const mm = String(c.date.getMonth()+1).padStart(2,'0');
     const dd = String(c.date.getDate()).padStart(2,'0');
@@ -289,7 +248,7 @@ function renderCalendar() {
     const day = document.createElement('div');
     day.className = 'day' + (c.inMonth ? '' : ' muted');
     const count = avail.get(key);
-    if (count && c.inMonth) {
+    if (count && c.inMonth){
       day.classList.add('has');
       day.title = `${count.toLocaleString()} messages`;
       const badge = document.createElement('div'); badge.className='dot'; day.append(badge);
@@ -299,6 +258,8 @@ function renderCalendar() {
         [...grid.children].forEach(el => el.classList.remove('selected'));
         day.classList.add('selected');
         await loadMessages(key);
+        // blur any focused control to avoid iOS sticky zoom
+        if (document.activeElement) document.activeElement.blur();
       });
       if (selectedDay === key) day.classList.add('selected');
     }
@@ -307,24 +268,16 @@ function renderCalendar() {
   }
 }
 
-/* Nav buttons */
-$('#prev').addEventListener('click', () => {
-  if (curM === 0) { curM=11; curY--; } else { curM--; }
-  renderCalendar();
-});
-$('#next').addEventListener('click', () => {
-  if (curM === 11) { curM=0; curY++; } else { curM++; }
-  renderCalendar();
-});
-$('#month').addEventListener('change', e => { curM = +e.target.value; renderCalendar(); });
-$('#year').addEventListener('change', e => { curY = +e.target.value; renderCalendar(); });
+$('#prev').addEventListener('click', () => { if (curM===0){curM=11;curY--;} else curM--; renderCalendar(); });
+$('#next').addEventListener('click', () => { if (curM===11){curM=0;curY++;} else curM++; renderCalendar(); });
+$('#month').addEventListener('change', e => { curM = +e.target.value; renderCalendar(); if (document.activeElement) document.activeElement.blur(); });
+$('#year').addEventListener('change',  e => { curY = +e.target.value; renderCalendar(); if (document.activeElement) document.activeElement.blur(); });
 
-/* Load dates + default day */
-async function loadDates() {
-  try {
+async function loadDates(){
+  try{
     const dates = await fetchJSON('/dates');   // [{date, count}]
     avail.clear(); months.clear();
-    for (const d of dates) {
+    for (const d of dates){
       const day = d.date || d.ts_local_date || d;
       avail.set(day, d.count ?? 0);
       months.add(day.slice(0,7));
@@ -336,28 +289,25 @@ async function loadDates() {
     curY = +y; curM = +m - 1;
     renderCalendar();
     await loadMessages(latest);
-  } catch (e) {
+  }catch(e){
     console.error(e); banner('Failed to load dates.', false);
   }
 }
 
-/* Load messages for a day */
-async function loadMessages(dateStr) {
-  try {
-    document.getElementById('channel-title').textContent = `# chat-archive — ${dateStr}`;
+async function loadMessages(dateStr){
+  try{
+    $('#channel-title').textContent = `# chat-archive — ${dateStr}`;
     const msgs = await fetchJSON(`/messages?date=${encodeURIComponent(dateStr)}`);
-    const wrap = document.getElementById('messages'); wrap.innerHTML = '';
+    const wrap = $('#messages'); wrap.innerHTML = '';
     for (const m of msgs) wrap.append(messageRow(m));
-    document.getElementById('count').textContent = msgs.length ? `(${msgs.length.toLocaleString()} msgs)` : '(0 msgs)';
+    $('#count').textContent = msgs.length ? `(${msgs.length.toLocaleString()} msgs)` : '(0 msgs)';
     if (!msgs.length) wrap.innerHTML = '<div class="muted">No messages for this day.</div>';
-  } catch (e) {
+  }catch(e){
     console.error(e); banner('Failed to load messages.', false);
   }
 }
 
-/* =========================
-   SEARCH (no navigation)
-   ========================= */
+/* ========= SEARCH ========= */
 let currentSearch = "";
 async function fetchSearch(q, limit=1000, offset=0){
   const url = `${API_BASE}/search?` + new URLSearchParams({ q, limit, offset });
@@ -365,6 +315,7 @@ async function fetchSearch(q, limit=1000, offset=0){
   if (!res.ok) throw new Error(`/search ${res.status}`);
   return res.json();
 }
+
 function setContentWithHighlight(containerEl, text, query){
   containerEl.textContent = "";
   if (!query){ containerEl.textContent = text || ""; return; }
@@ -373,11 +324,12 @@ function setContentWithHighlight(containerEl, text, query){
   while (i < src.length){
     const idx = src.toLowerCase().indexOf(q, i);
     if (idx === -1){ containerEl.append(document.createTextNode(src.slice(i))); break; }
-    if (idx > i){ containerEl.append(document.createTextNode(src.slice(i, idx))); }
-    const mark = document.createElement("span"); mark.className = "hl"; mark.textContent = src.slice(idx, idx + q.length);
+    if (idx > i) containerEl.append(document.createTextNode(src.slice(i, idx)));
+    const mark = document.createElement("span"); mark.className="hl"; mark.textContent = src.slice(idx, idx+q.length);
     containerEl.append(mark); i = idx + q.length;
   }
 }
+
 function messageRowWithHL(m, query){
   const row = document.createElement('div'); row.className='row';
   const av = document.createElement('img'); av.className='avatar';
@@ -396,9 +348,9 @@ function messageRowWithHL(m, query){
   setContentWithHighlight(content, m.content || '', query);
 
   const attWrap = document.createElement('div'); attWrap.className='att';
-  if (Array.isArray(m.attachments)) {
-    for (const a of m.attachments) {
-      const src = a.url; if (!src) continue;
+  if (Array.isArray(m.attachments)){
+    for (const a of m.attachments){
+      const src = a.url || a.s3_url; if (!src) continue;
       const img = document.createElement('img'); img.src = src; img.alt = a.filename || '';
       attWrap.append(img);
     }
@@ -409,56 +361,51 @@ function messageRowWithHL(m, query){
 }
 
 async function doSearch(e){
-  if (e) { e.preventDefault(); e.stopPropagation(); }
-  const input = document.getElementById('search-input');
+  if (e){ e.preventDefault(); e.stopPropagation(); }
+  const input = $('#search-input');
   const q = (input.value || '').trim();
   if (!q) return;
 
   currentSearch = q;
-  document.getElementById('channel-title').textContent = `# search — "${q}"`;
-  document.getElementById('count').textContent = '';
-  document.getElementById('search-hint').textContent = 'Searching…';
+  $('#channel-title').textContent = `# search — "${q}"`;
+  $('#count').textContent = '';
+  $('#search-hint').textContent = 'Searching…';
 
-  try {
+  try{
     const { ok, rows } = await fetchSearch(q, 2000, 0);
-    const wrap = document.getElementById('messages');
-    wrap.innerHTML = '';
+    const wrap = $('#messages'); wrap.innerHTML = '';
     for (const m of rows) wrap.append(messageRowWithHL(m, q));
-    document.getElementById('count').textContent =
-      rows.length ? `(${rows.length.toLocaleString()} results)` : '(0 results)';
-    document.getElementById('search-hint').textContent = rows.length ? '' : 'No matches.';
-  } catch (err) {
+    $('#count').textContent = rows.length ? `(${rows.length.toLocaleString()} results)` : '(0 results)';
+    $('#search-hint').textContent = rows.length ? '' : 'No matches.';
+  }catch(err){
     console.error(err);
     banner('Search failed.', false);
-    document.getElementById('search-hint').textContent = 'Search failed.';
+    $('#search-hint').textContent = 'Search failed.';
+  }finally{
+    // blur so iOS doesn't keep zoom level
+    input.blur();
   }
 }
 
-/* Drawer toggle (mobile) */
-function setupDrawer(){
-  const btn = document.getElementById('toggle-controls');
-  const drawer = document.getElementById('drawer');
-  if (!btn || !drawer) return;
-  btn.addEventListener('click', () => {
-    const collapsed = drawer.classList.toggle('collapsed');
-    btn.setAttribute('aria-expanded', String(!collapsed));
-  });
-}
-
-/* Boot */
+/* ===== init ===== */
 window.addEventListener('DOMContentLoaded', () => {
-  // Ensure form never navigates
-  const form = document.getElementById('search-form');
-  if (form) {
-    form.setAttribute('action', 'javascript:void(0)');
+  // burger toggle (mobile)
+  const burger = $('#burger'), inner = $('#leftInner');
+  if (burger && inner){
+    const set = (open) => { inner.classList.toggle('open', open); inner.classList.toggle('collapsed', !open); };
+    set(true);
+    burger.addEventListener('click', ()=> set(!inner.classList.contains('open')));
+  }
+
+  const form = $('#search-form');
+  if (form){
+    form.setAttribute('action','javascript:void(0)');
     form.noValidate = true;
     form.addEventListener('submit', doSearch);
   }
-  const input = document.getElementById('search-input');
-  if (input) {
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(e); });
-  }
-  setupDrawer();
+  const input = $('#search-input');
+  if (input){ input.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(e); }); }
+
   loadDates();
 });
 </script>
