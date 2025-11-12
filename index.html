@@ -48,32 +48,24 @@
       border-radius: 10px; 
       width: 100%; 
     }
-    .cal-head {
-      position: relative;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px;
-      border-bottom: 1px solid #1b1c20;
-      gap: 8px;
+    .cal-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;  /* left group ↔ right group */
+      padding:8px;
+      border-bottom:1px solid #1b1c20;
     }
     
-    .cal-head button {
-      background: #1f2024;
-      color: #d6d8dd;
-      border: 1px solid #16171a;
-      border-radius: 6px;
-      padding: 6px 10px;
-      cursor: pointer;
-      flex: 0 0 auto;
-    }
+
+    .cal-side{ display:flex; align-items:center; gap:8px; }  /* same gap both sides */
     
-    .cal-head select {
-      background: #1f2024;
-      color: #d6d8dd;
-      border: 1px solid #16171a;
-      border-radius: 6px;
-      padding: 6px 10px;
+    .cal-head button{
+      background:#1f2024; color:#d6d8dd; border:1px solid #16171a;
+      border-radius:6px; padding:6px 10px; cursor:pointer; white-space:nowrap;
+    }
+    .cal-head select{
+      background:#1f2024; color:#d6d8dd; border:1px solid #16171a;
+      border-radius:6px; padding:6px 10px; white-space:nowrap;
     }
     /* ensure no overflow */
     .cal-week {
@@ -99,13 +91,9 @@
     .count { position:absolute; top:6px; right:6px; font-size:10px; color:#aeb4ba }
     /* give Month a reasonable minimum, Year a fixed width */
     /* size balance */
-    #month {
-      flex: 1 1 auto;
-      min-width: 140px;
-    }
-    #year {
-      width: 96px;
-      margin-right: 8px; /* this gives you the same gap before Next */
+    #month{ min-width:140px; }
+    #year{ width:88px; } /* gives year a steady width so the right-side spacing feels identical */
+
     }
     #next{
       position:absolute;
@@ -127,10 +115,15 @@
         <!-- Calendar -->
         <div class="cal">
           <div class="cal-head">
-            <button id="prev">Prev</button>
-            <select id="month"></select>
-            <select id="year"></select>
-            <button id="next">Next</button>
+            <div class="cal-side cal-left">
+              <button id="prev">Prev</button>
+              <select id="month"></select>
+            </div>
+          
+            <div class="cal-side cal-right">
+              <select id="year"></select>
+              <button id="next">Next</button>
+            </div>
           </div>
           <div class="cal-week">
             <div>SUN</div><div>MON</div><div>TUE</div><div>WED</div><div>THU</div><div>FRI</div><div>SAT</div>
@@ -262,27 +255,39 @@ function renderCalendar() {
     const mm = String(c.date.getMonth()+1).padStart(2,'0');
     const dd = String(c.date.getDate()).padStart(2,'0');
     const key = `${yyyy}-${mm}-${dd}`;
+  
     const day = document.createElement('div');
     day.className = 'day' + (c.inMonth ? '' : ' muted');
+  
+    // number first
+    const num = document.createElement('span');
+    num.textContent = c.date.getDate();
+    day.append(num);
+  
     const count = avail.get(key);
     if (count && c.inMonth) {
       day.classList.add('has');
       day.title = `${count.toLocaleString()} messages`;
-      const badge = document.createElement('div'); badge.className='dot'; day.append(badge);
-      const cnt = document.createElement('div'); cnt.className='count'; cnt.textContent = count>999 ? '999+' : String(count); day.append(cnt);
+  
+      const badge = document.createElement('div'); badge.className='dot';
+      const cnt   = document.createElement('div'); cnt.className='count';
+      cnt.textContent = count > 999 ? '999+' : String(count);
+  
+      day.append(badge, cnt);
+  
       day.addEventListener('click', async () => {
         selectedDay = key;
         [...grid.children].forEach(el => el.classList.remove('selected'));
         day.classList.add('selected');
         await loadMessages(key);
       });
+  
       if (selectedDay === key) day.classList.add('selected');
     }
-    day.textContent = c.date.getDate();
+  
     grid.append(day);
   }
-}
-
+  
 /* controls */
 $('#prev').addEventListener('click', () => {
   if (curM === 0) { curM=11; curY--; } else { curM--; }
