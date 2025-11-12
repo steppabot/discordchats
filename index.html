@@ -54,7 +54,7 @@
   </div>
 
 <script>
-const API_BASE = "https://discordchats-9ef6930e36f8.herokuapp.com";  // <-- your Heroku URL
+const API_BASE = "https://discordchats-9ef6930e36f8.herokuapp.com/api  // <-- your Heroku URL
 
 const $ = (s) => document.querySelector(s);
 
@@ -132,7 +132,7 @@ async function loadMessages(dateStr, btnEl) {
     $('#channel-title').textContent = `# chat-archive — ${dateStr}`;
     if (btnEl) [...btnEl.parentNode.children].forEach(b=>b.classList.remove('active')), btnEl.classList.add('active');
 
-    const msgs = await fetchJSON(`/messages?date_str=${encodeURIComponent(dateStr)}`);
+    const msgs = await fetchJSON(`/messages?date=${encodeURIComponent(date)}`);
     const wrap = $('#messages'); wrap.innerHTML = '';
     for (const m of msgs) wrap.append(messageRow(m));
     $('#count').textContent = msgs.length ? `(${msgs.length.toLocaleString()} msgs)` : '(0 msgs)';
