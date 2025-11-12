@@ -288,16 +288,18 @@ async def messages(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/messages")
-async def messages(
-    date: str = Query(..., description="YYYY-MM-DD (local day)"),
-    limit: int = Query(2000, ge=1, le=10000),
+# ------------------------------
+# Full-archive search (earliest → latest)
+# ------------------------------
+@app.get("/api/search")
+async def search_messages(
+    q: str = Query(..., min_length=2, max_length=100, description="Search term"),
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0, le=100000),
 ):
-    # Validate date
-    try:
-        d = Date.fromisoformat(date)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Bad date; use YYYY-MM-DD")
+    term = q.strip()
+    if not term:
+        raise HTTPException(status_code=400, detail="Empty search query")
 
     try:
         async with _pool.acquire() as conn:
@@ -311,6 +313,7 @@ async def messages(
                         m.role_color_1,
                         m.role_color_2,
                         m.ts_local_time,
+                        m.ts_local_date,
                         m.ts_utc,
                         m.channel_id,
                         m.content,
@@ -329,15 +332,15 @@ async def messages(
                     FROM archived_messages m
                     LEFT JOIN archived_attachments a
                       ON a.message_id = m.message_id
-                    WHERE m.ts_local_date = $1
+                    WHERE m.content ILIKE '%' || $1 || '%'
                     GROUP BY m.message_id
                     ORDER BY m.ts_utc ASC, m.channel_id ASC, m.message_id ASC
-                    LIMIT $2
+                    LIMIT $2 OFFSET $3
                     """,
-                    d, limit
+                    term, limit, offset
                 )
             except Exception as join_err:
-                log.warning("Attachments join skipped: %s", join_err)
+                log.warning("Attachments join skipped in /api/search: %s", join_err)
                 rows = await conn.fetch(
                     """
                     SELECT
@@ -347,18 +350,20 @@ async def messages(
                         m.role_color_1,
                         m.role_color_2,
                         m.ts_local_time,
+                        m.ts_local_date,
                         m.ts_utc,
                         m.channel_id,
                         m.content
                     FROM archived_messages m
-                    WHERE m.ts_local_date = $1
+                    WHERE m.content ILIKE '%' || $1 || '%'
                     ORDER BY m.ts_utc ASC, m.channel_id ASC, m.message_id ASC
-                    LIMIT $2
+                    LIMIT $2 OFFSET $3
                     """,
-                    d, limit
+                    term, limit, offset
                 )
+                # normalize to same shape as the joined query
+                rows = [dict(r) | {"attachments": []} for r in rows]
 
-        # Convert to plain dicts and normalize attachments
         out = []
         for rec in rows:
             r = dict(rec)
@@ -370,11 +375,13 @@ async def messages(
                 "role_color_1": r.get("role_color_1"),
                 "role_color_2": r.get("role_color_2"),
                 "time": r.get("ts_local_time"),
+                "date": str(r.get("ts_local_date")) if r.get("ts_local_date") else None,
                 "content": r.get("content"),
                 "attachments": atts,
             })
-        return out
+
+        return {"ok": True, "q": term, "rows": out}
 
     except Exception as e:
-        log.exception("/api/messages failed: %s", e)
+        log.exception("/api/search failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
