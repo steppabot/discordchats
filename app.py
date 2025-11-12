@@ -4,162 +4,167 @@ from zoneinfo import ZoneInfo
 from typing import Optional
 
 import asyncpg
-from fastapi import FastAPI, Query, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.staticfiles import StaticFiles
 
 import boto3
 from botocore.config import Config as BotoConfig
 
-# ------------------ Env ------------------
+# --- Env ---
 DB_URL = os.getenv("DATABASE_URL")
-ARCHIVE_TZ = ZoneInfo(os.getenv("ARCHIVE_TZ", "America/Chicago"))
+ARCHIVE_TZ = os.getenv("ARCHIVE_TZ", "America/Chicago")
+TZ = ZoneInfo(ARCHIVE_TZ)
 
-# Prefer public URL base if you made the bucket public
-S3_PUBLIC_URL_BASE = (os.getenv("S3_PUBLIC_URL_BASE", "").rstrip("/") or None)
-
+S3_PUBLIC_URL_BASE = (os.getenv("S3_PUBLIC_URL_BASE") or "").rstrip("/")
 STACKHERO_ENDPOINT = os.getenv("STACKHERO_S3_ENDPOINT") or os.getenv("STACKHERO_MINIO_HOST")
-STACKHERO_ACCESS_KEY = os.getenv("STACKHERO_S3_ACCESS_KEY") or os.getenv("STACKHERO_MINIO_ROOT_ACCESS_KEY")
-STACKHERO_SECRET_KEY = os.getenv("STACKHERO_S3_SECRET_KEY") or os.getenv("STACKHERO_MINIO_ROOT_SECRET_KEY")
-STACKHERO_BUCKET     = os.getenv("STACKHERO_S3_BUCKET") or os.getenv("STACKHERO_MINIO_BUCKET")
+STACKHERO_ACCESS = os.getenv("STACKHERO_S3_ACCESS_KEY") or os.getenv("STACKHERO_MINIO_ROOT_ACCESS_KEY")
+STACKHERO_SECRET = os.getenv("STACKHERO_S3_SECRET_KEY") or os.getenv("STACKHERO_MINIO_ROOT_SECRET_KEY")
+STACKHERO_BUCKET = os.getenv("STACKHERO_S3_BUCKET") or os.getenv("STACKHERO_MINIO_BUCKET")
 if STACKHERO_ENDPOINT and not STACKHERO_ENDPOINT.startswith("http"):
     STACKHERO_ENDPOINT = f"https://{STACKHERO_ENDPOINT}"
 
-AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-S3_BUCKET = os.getenv("S3_BUCKET")
+if not DB_URL:
+    raise RuntimeError("DATABASE_URL is required")
 
-def _s3_client():
-    if STACKHERO_ENDPOINT and STACKHERO_ACCESS_KEY and STACKHERO_SECRET_KEY and (STACKHERO_BUCKET or S3_BUCKET):
-        return boto3.client(
-            "s3",
-            endpoint_url=STACKHERO_ENDPOINT,
-            aws_access_key_id=STACKHERO_ACCESS_KEY,
-            aws_secret_access_key=STACKHERO_SECRET_KEY,
-            config=BotoConfig(s3={"addressing_style": "path"}),
-        )
-    if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY and S3_BUCKET:
-        return boto3.client(
-            "s3",
-            region_name=AWS_REGION,
-            aws_access_key_id=AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-            config=BotoConfig(s3={"addressing_style": "virtual"}),
-        )
-    return None
-
-_BUCKET = (STACKHERO_BUCKET or S3_BUCKET)
-_s3 = _s3_client()
-
-# ------------------ App ------------------
-app = FastAPI(title="Wolfpac Archive")
-
-# Static files (put wolfpac.gif and fonts in ./static)
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Jinja templates
-env = Environment(
-    loader=FileSystemLoader("templates"),
-    autoescape=select_autoescape(["html"])
+# --- App ---
+app = FastAPI(title="DiscordChats")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
 
+# Serve index.html from root
+@app.get("/")
+async def root_page():
+    return FileResponse("index.html", media_type="text/html")
+
+# (Optional) serve /wolfpac.gif etc. if you put assets in ./public
+if os.path.isdir("public"):
+    app.mount("/public", StaticFiles(directory="public"), name="public")
+
+# --- DB Pool ---
 _pool: Optional[asyncpg.Pool] = None
 
 @app.on_event("startup")
-async def startup():
+async def _startup():
     global _pool
-    if not DB_URL:
-        raise RuntimeError("DATABASE_URL not set")
-    _pool = await asyncpg.create_pool(DB_URL)
+    _pool = await asyncpg.create_pool(DB_URL, max_inactive_connection_lifetime=30.0)
 
-def _presign_if_needed(s3_key: Optional[str], s3_url: Optional[str]) -> Optional[str]:
-    """
-    Return a public URL for an attachment:
-    - If you stored s3_url and bucket is public: use it.
-    - Else, when s3_key exists and we have an S3 client: return a presigned GET.
-    """
-    if s3_url:
-        return s3_url
-    if s3_key and _s3 and _BUCKET:
-        try:
-            return _s3.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": _BUCKET, "Key": s3_key},
-                ExpiresIn=3600  # 1 hour
-            )
-        except Exception:
-            return None
+@app.on_event("shutdown")
+async def _shutdown():
+    if _pool:
+        await _pool.close()
+
+async def db() -> asyncpg.Connection:
+    assert _pool is not None
+    async with _pool.acquire() as conn:
+        yield conn
+
+# --- S3 client (for presign if needed) ---
+def _s3_client():
+    if STACKHERO_ENDPOINT and STACKHERO_ACCESS and STACKHERO_SECRET and STACKHERO_BUCKET:
+        return boto3.client(
+            "s3",
+            endpoint_url=STACKHERO_ENDPOINT,
+            aws_access_key_id=STACKHERO_ACCESS,
+            aws_secret_access_key=STACKHERO_SECRET,
+            config=BotoConfig(s3={"addressing_style": "path"}),
+        )
     return None
 
-# ------------------ Pages ------------------
-@app.get("/", response_class=HTMLResponse)
-async def index():
-    # get earliest and latest local date present
-    async with _pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT MIN(ts_local_date) AS min_d, MAX(ts_local_date) AS max_d
-            FROM archived_messages
-        """)
-    min_d = row["min_d"] or dt.date.today()
-    max_d = row["max_d"] or dt.date.today()
-    tmpl = env.get_template("index.html")
-    return tmpl.render(min_date=min_d.isoformat(), max_date=max_d.isoformat())
+def public_or_presigned_url(s3_key: Optional[str]) -> Optional[str]:
+    if not s3_key:
+        return None
+    # Prefer public base
+    if S3_PUBLIC_URL_BASE:
+        return f"{S3_PUBLIC_URL_BASE}/{s3_key}"
+    # Else presign
+    s3 = _s3_client()
+    if not s3:
+        return None
+    try:
+        return s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": STACKHERO_BUCKET, "Key": s3_key},
+            ExpiresIn=3600,
+        )
+    except Exception:
+        return None
 
-# ------------------ API ------------------
+# ---------------- API ----------------
+
+@app.get("/api/dates")
+async def list_dates(conn: asyncpg.Connection = Depends(db)):
+    """
+    Return all dates we have messages for (oldest → newest) with counts.
+    """
+    rows = await conn.fetch(
+        "SELECT ts_local_date::date AS d, COUNT(*) AS c "
+        "FROM archived_messages GROUP BY 1 ORDER BY 1 ASC"
+    )
+    return [{"date": r["d"].isoformat(), "count": r["c"]} for r in rows]
+
 @app.get("/api/messages")
-async def api_messages(date: str = Query(..., description="YYYY-MM-DD in ARCHIVE_TZ")):
+async def messages_by_date(
+    date: str,
+    channel_id: Optional[int] = None,
+    offset: int = 0,
+    limit: int = 500,   # tune as needed
+    conn: asyncpg.Connection = Depends(db),
+):
+    """
+    Return messages for a local date (ARCHIVE_TZ). Optional channel filter.
+    Includes attachments as direct/public/presigned URLs.
+    """
     try:
         d = dt.date.fromisoformat(date)
     except Exception:
-        raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD")
+        raise HTTPException(400, "Invalid date. Use YYYY-MM-DD")
 
-    async with _pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT m.message_id, m.channel_id, m.user_id, m.display_name,
-                   m.ts_local_time, m.role_color_1, m.role_color_2,
-                   m.avatar_url, m.content,
-                   COALESCE(a.list, '[]') AS attachments
-            FROM archived_messages m
-            LEFT JOIN LATERAL (
-                SELECT json_agg(json_build_object(
-                    'filename', aa.filename,
-                    'content_type', aa.content_type,
-                    'size_bytes', aa.size_bytes,
-                    'url', aa.url,
-                    's3_key', aa.s3_key,
-                    's3_url', aa.s3_url
-                ) ORDER BY aa.attachment_id) AS list
-                FROM archived_attachments aa
-                WHERE aa.message_id = m.message_id
-            ) a ON TRUE
-            WHERE m.ts_local_date = $1
-            ORDER BY m.ts_local_date ASC, m.ts_local_time ASC, m.message_id ASC
-        """, d)
+    base_sql = (
+        "SELECT m.message_id, m.guild_id, m.channel_id, m.user_id, m.display_name, "
+        "m.ts_local_time, m.role_color_1, m.role_color_2, m.avatar_url, m.content "
+        "FROM archived_messages m WHERE m.ts_local_date = $1"
+    )
+    args = [d]
+    if channel_id:
+        base_sql += " AND m.channel_id = $2"
+        args.append(channel_id)
+    base_sql += " ORDER BY m.ts_utc ASC OFFSET $%d LIMIT $%d" % (len(args)+1, len(args)+2)
+    args.extend([offset, limit])
 
-    # decorate attachment URLs (presign if needed)
+    msgs = await conn.fetch(base_sql, *args)
+    ids = [r["message_id"] for r in msgs]
+    att_map = {}
+    if ids:
+        atts = await conn.fetch(
+            "SELECT message_id, attachment_id, filename, content_type, size_bytes, url, proxy_url, s3_key, s3_url "
+            "FROM archived_attachments WHERE message_id = ANY($1::bigint[]) ORDER BY attachment_id",
+            ids,
+        )
+        for a in atts:
+            att_map.setdefault(a["message_id"], []).append({
+                "attachment_id": a["attachment_id"],
+                "filename": a["filename"],
+                "content_type": a["content_type"],
+                "size_bytes": a["size_bytes"],
+                # Prefer public/presigned over raw discord url
+                "url": public_or_presigned_url(a["s3_key"]) or a["s3_url"] or a["url"] or a["proxy_url"],
+            })
+
     out = []
-    for r in rows:
-        att_list = []
-        try:
-            import json as _json
-            att_list = _json.loads(r["attachments"])
-        except Exception:
-            att_list = []
-
-        for a in att_list:
-            a["display_url"] = _presign_if_needed(a.get("s3_key"), a.get("s3_url")) or a.get("url")
-
+    for r in msgs:
         out.append({
-            "message_id": str(r["message_id"]),
+            "message_id": r["message_id"],
+            "channel_id": r["channel_id"],
             "display_name": r["display_name"],
-            "ts_local_time": r["ts_local_time"],
+            "time": r["ts_local_time"],
             "role_color_1": r["role_color_1"],
             "role_color_2": r["role_color_2"],
             "avatar_url": r["avatar_url"],
             "content": r["content"],
-            "attachments": att_list,
+            "attachments": att_map.get(r["message_id"], []),
         })
-
-    return JSONResponse(out)
+    return {"items": out, "next_offset": offset + len(out)}
