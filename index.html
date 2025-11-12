@@ -177,9 +177,9 @@
       </div>
       <div class="search">
         <div class="search-title">Search <span class="glass">🔍</span></div>
-        <form id="search-form" autocomplete="off">
-          <input id="search-input" type="text" placeholder="Find messages…" />
-        </form>
+          <form id="search-form" action="javascript:;" novalidate autocomplete="off">
+            <input id="search-input" type="text" placeholder="Find messages…" />
+          </form>
         <div id="search-hint" class="muted" style="margin-top:6px; font-size:12px;"></div>
       </div>
     </aside>
@@ -247,16 +247,15 @@ function messageRow(m) {
   return row;
 }
 
-let avail = new Map();        
-let months = new Set();       
-let curY, curM;              
-let selectedDay = null;      
+let avail = new Map();
+let months = new Set();
+let curY, curM;
+let selectedDay = null;
 
 function fillMonthYearRanges() {
   const mo = $('#month'), yr = $('#year');
   const names = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   mo.innerHTML = names.map((n,i)=>`<option value="${i}">${n}</option>`).join('');
-  
   const years = [...months].map(s=>+s.split('-')[0]);
   const ymin = Math.min(...years), ymax = Math.max(...years);
   let yopt = '';
@@ -270,11 +269,11 @@ function renderCalendar() {
 
   const grid = $('#cal-grid'); grid.innerHTML = '';
   const first = new Date(curY, curM, 1);
-  const startDay = first.getDay(); // 0..6
+  const startDay = first.getDay();
   const daysInMonth = new Date(curY, curM+1, 0).getDate();
 
   const prevDays = startDay;
-  const totalCells = 42; // 6 weeks
+  const totalCells = 42;
   const prevMonthDays = new Date(curY, curM, 0).getDate();
 
   const cells = [];
@@ -316,7 +315,7 @@ function renderCalendar() {
     grid.append(day);
   }
 }
-  
+
 $('#prev').addEventListener('click', () => {
   if (curM === 0) { curM=11; curY--; } else { curM--; }
   renderCalendar();
@@ -329,24 +328,19 @@ $('#month').addEventListener('change', e => { curM = +e.target.value; renderCale
 $('#year').addEventListener('change', e => { curY = +e.target.value; renderCalendar(); });
 
 async function loadDates() {
-
   try {
     const dates = await fetchJSON('/dates');   // [{date, count}]
     avail.clear(); months.clear();
     for (const d of dates) {
       const day = d.date || d.ts_local_date || d;
       avail.set(day, d.count ?? 0);
-      months.add(day.slice(0,7)); // YYYY-MM
+      months.add(day.slice(0,7));
     }
-
     fillMonthYearRanges();
-
-
     const latest = [...avail.keys()].sort().pop();
     selectedDay = latest;
     const [y,m] = latest.split('-');
     curY = +y; curM = +m - 1;
-
     renderCalendar();
     await loadMessages(latest);
   } catch (e) {
@@ -370,7 +364,7 @@ async function loadMessages(dateStr) {
 // --- STATE
 let currentSearch = "";
 
-// --- helper: fetch
+// --- fetch helper for search
 async function fetchSearch(q, limit=1000, offset=0){
   const url = `${API_BASE}/search?` + new URLSearchParams({ q, limit, offset });
   const res = await fetch(url, { credentials:'omit' });
@@ -378,33 +372,34 @@ async function fetchSearch(q, limit=1000, offset=0){
   return res.json();
 }
 
-// --- helper: highlight text in a node by splitting safely (no innerHTML)
+// --- highlight helper (no innerHTML)
 function setContentWithHighlight(containerEl, text, query){
-  containerEl.textContent = ""; // clear
+  containerEl.textContent = "";
   if (!query){
     containerEl.textContent = text || "";
     return;
   }
   const q = query.toLowerCase();
   let i = 0;
-  while (i < (text || "").length){
-    const idx = text.toLowerCase().indexOf(q, i);
+  const src = text || "";
+  while (i < src.length){
+    const idx = src.toLowerCase().indexOf(q, i);
     if (idx === -1){
-      containerEl.append(document.createTextNode(text.slice(i)));
+      containerEl.append(document.createTextNode(src.slice(i)));
       break;
     }
     if (idx > i){
-      containerEl.append(document.createTextNode(text.slice(i, idx)));
+      containerEl.append(document.createTextNode(src.slice(i, idx)));
     }
     const mark = document.createElement("span");
     mark.className = "hl";
-    mark.textContent = text.slice(idx, idx + q.length);
+    mark.textContent = src.slice(idx, idx + q.length);
     containerEl.append(mark);
     i = idx + q.length;
   }
 }
 
-// --- override messageRow to allow highlight on content only
+// --- row with highlight + date in header
 function messageRowWithHL(m, query){
   const row = document.createElement('div'); row.className='row';
   const av = document.createElement('img'); av.className='avatar';
@@ -416,7 +411,6 @@ function messageRowWithHL(m, query){
   paintName(name, m.role_color_1);
   const wolf = document.createElement('span'); wolf.textContent='🐺';
   const time = document.createElement('span'); time.className='muted'; time.style.fontSize='12px';
-  // Show date on search results to give context
   time.textContent = (m.date ? `${m.date} ` : "") + (m.time || m.ts_local_time || '');
   head.append(name, wolf, time);
 
@@ -436,10 +430,13 @@ function messageRowWithHL(m, query){
   return row;
 }
 
-// --- search submit handler
-document.getElementById('search-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const q = document.getElementById('search-input').value.trim();
+/* ---------------------------
+   SEARCH (no navigation)
+----------------------------*/
+async function doSearch(e){
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  const input = document.getElementById('search-input');
+  const q = (input.value || '').trim();
   if (!q) return;
 
   currentSearch = q;
@@ -451,27 +448,34 @@ document.getElementById('search-form').addEventListener('submit', async (e) => {
     const { ok, rows } = await fetchSearch(q, 2000, 0);
     const wrap = document.getElementById('messages');
     wrap.innerHTML = '';
-    for (const m of rows){
-      wrap.append(messageRowWithHL(m, q));
-    }
-    document.getElementById('count').textContent = rows.length ? `(${rows.length.toLocaleString()} results)` : '(0 results)';
+    for (const m of rows) wrap.append(messageRowWithHL(m, q));
+    document.getElementById('count').textContent =
+      rows.length ? `(${rows.length.toLocaleString()} results)` : '(0 results)';
     document.getElementById('search-hint').textContent = rows.length ? '' : 'No matches.';
   } catch (err) {
     console.error(err);
     banner('Search failed.', false);
     document.getElementById('search-hint').textContent = 'Search failed.';
   }
-});
+}
 
-// (optional) Enter-to-search quickly even if form not focused
-document.getElementById('search-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    document.getElementById('search-form').dispatchEvent(new Event('submit'));
+// Ensure form never navigates even if handler doesn't attach
+window.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('search-form');
+  if (form) {
+    form.setAttribute('action', 'javascript:void(0)');
+    form.noValidate = true;
+    form.addEventListener('submit', doSearch);
   }
+  const input = document.getElementById('search-input');
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doSearch(e);
+    });
+  }
+  loadDates();
 });
-
-window.addEventListener('DOMContentLoaded', loadDates);
 </script>
+
 </body>
 </html>
