@@ -112,7 +112,30 @@
     .day.selected{ outline:2px solid var(--brand); box-shadow:0 0 0 2px rgba(114,137,218,.25) inset; }
     .dot { position:absolute; bottom:6px; right:6px; width:8px; height:8px; border-radius:50%; background:#4ade80 }
     .count { position:absolute; top:6px; right:6px; font-size:10px; color:#aeb4ba }
-
+    .search{
+      margin: 14px 10px 14px;
+      padding: 12px;
+      background: #26282d;
+      border: 1px solid #1b1c20;
+      border-radius: 10px;
+    }
+    .search-title{
+      font-weight: 800; letter-spacing: .3px; margin-bottom: 8px;
+      display:flex; align-items:center; gap:6px;
+    }
+    .search .glass{ filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
+    #search-form{ display:block }
+    #search-input{
+      width: 100%;
+      background:#1f2024; color:#e8eaed;
+      border:1px solid #16171a; border-radius:8px; padding:10px 12px;
+      outline:none;
+    }
+    #search-input::placeholder{ color:#9aa0a6 }
+    .hl{
+      background:#5f5345; color:#fff; border-radius:4px; padding:0 2px;
+    }
+    
     #month{ min-width:140px; }
     #year{ width:88px; } 
 
@@ -151,6 +174,13 @@
           </div>
           <div id="cal-grid" class="cal-grid"></div>
         </div>
+      </div>
+      <div class="search">
+        <div class="search-title">Search <span class="glass">🔍</span></div>
+        <form id="search-form" autocomplete="off">
+          <input id="search-input" type="text" placeholder="Find messages…" />
+        </form>
+        <div id="search-hint" class="muted" style="margin-top:6px; font-size:12px;"></div>
       </div>
     </aside>
 
@@ -336,6 +366,110 @@ async function loadMessages(dateStr) {
     console.error(e); banner('Failed to load messages.', false);
   }
 }
+
+// --- STATE
+let currentSearch = "";
+
+// --- helper: fetch
+async function fetchSearch(q, limit=1000, offset=0){
+  const url = `${API_BASE}/search?` + new URLSearchParams({ q, limit, offset });
+  const res = await fetch(url, { credentials:'omit' });
+  if (!res.ok) throw new Error(`/search ${res.status}`);
+  return res.json();
+}
+
+// --- helper: highlight text in a node by splitting safely (no innerHTML)
+function setContentWithHighlight(containerEl, text, query){
+  containerEl.textContent = ""; // clear
+  if (!query){
+    containerEl.textContent = text || "";
+    return;
+  }
+  const q = query.toLowerCase();
+  let i = 0;
+  while (i < (text || "").length){
+    const idx = text.toLowerCase().indexOf(q, i);
+    if (idx === -1){
+      containerEl.append(document.createTextNode(text.slice(i)));
+      break;
+    }
+    if (idx > i){
+      containerEl.append(document.createTextNode(text.slice(i, idx)));
+    }
+    const mark = document.createElement("span");
+    mark.className = "hl";
+    mark.textContent = text.slice(idx, idx + q.length);
+    containerEl.append(mark);
+    i = idx + q.length;
+  }
+}
+
+// --- override messageRow to allow highlight on content only
+function messageRowWithHL(m, query){
+  const row = document.createElement('div'); row.className='row';
+  const av = document.createElement('img'); av.className='avatar';
+  av.src = m.avatar_url || 'https://cdn.discordapp.com/embed/avatars/0.png';
+  const body = document.createElement('div'); body.style.flex='1';
+
+  const head = document.createElement('div'); head.style.cssText='display:flex;align-items:center;gap:8px';
+  const name = document.createElement('span'); name.className='name'; name.textContent = m.display_name || 'Unknown';
+  paintName(name, m.role_color_1);
+  const wolf = document.createElement('span'); wolf.textContent='🐺';
+  const time = document.createElement('span'); time.className='muted'; time.style.fontSize='12px';
+  // Show date on search results to give context
+  time.textContent = (m.date ? `${m.date} ` : "") + (m.time || m.ts_local_time || '');
+  head.append(name, wolf, time);
+
+  const content = document.createElement('div'); content.className='content';
+  setContentWithHighlight(content, m.content || '', query);
+
+  const attWrap = document.createElement('div'); attWrap.className='att';
+  if (Array.isArray(m.attachments)) {
+    for (const a of m.attachments) {
+      const src = a.url; if (!src) continue;
+      const img = document.createElement('img'); img.src = src; img.alt = a.filename || '';
+      attWrap.append(img);
+    }
+  }
+  body.append(head, content, attWrap);
+  row.append(av, body);
+  return row;
+}
+
+// --- search submit handler
+document.getElementById('search-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) return;
+
+  currentSearch = q;
+  document.getElementById('channel-title').textContent = `# search — "${q}"`;
+  document.getElementById('count').textContent = '';
+  document.getElementById('search-hint').textContent = 'Searching…';
+
+  try {
+    const { ok, rows } = await fetchSearch(q, 2000, 0);
+    const wrap = document.getElementById('messages');
+    wrap.innerHTML = '';
+    for (const m of rows){
+      wrap.append(messageRowWithHL(m, q));
+    }
+    document.getElementById('count').textContent = rows.length ? `(${rows.length.toLocaleString()} results)` : '(0 results)';
+    document.getElementById('search-hint').textContent = rows.length ? '' : 'No matches.';
+  } catch (err) {
+    console.error(err);
+    banner('Search failed.', false);
+    document.getElementById('search-hint').textContent = 'Search failed.';
+  }
+});
+
+// (optional) Enter-to-search quickly even if form not focused
+document.getElementById('search-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    document.getElementById('search-form').dispatchEvent(new Event('submit'));
+  }
+});
 
 window.addEventListener('DOMContentLoaded', loadDates);
 </script>
