@@ -2,33 +2,31 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <!-- prevent iOS zoom shenanigans -->
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <!-- Lock mobile zoom heuristics -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>DiscordChats — Wolfpac</title>
   <style>
     :root { --bg:#202225; --bg-2:#2f3136; --bg-3:#36393f; --text:#e5e7eb; --muted:#a3a6aa; --accent:#ed4245; --brand:#7289da; }
     * { box-sizing:border-box }
     html, body { height:100% }
-    body {
+    body{
       margin:0; background:var(--bg-3); color:var(--text);
       font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-      -webkit-text-size-adjust: 100%;
-      overflow-x: hidden;  /* never allow sideways scroll */
+      -webkit-text-size-adjust:100%; text-size-adjust:100%;
+      overflow-x:hidden;
+      touch-action: manipulation; /* prefer taps as clicks, no zoom */
     }
 
-    /* ===== LAYOUT ===== */
-    .layout { display:grid; grid-template-columns:380px 1fr; height:100vh }
-    .left { background:var(--bg-2); border-right:1px solid #1f2024; display:flex; flex-direction:column; overflow:auto }
-    .center { display:flex; flex-direction:column; height:100vh }
+    .layout{ display:grid; grid-template-columns:380px 1fr; height:100vh }
+    .left{ background:var(--bg-2); border-right:1px solid #1f2024; display:flex; flex-direction:column; overflow:auto }
+    .center{ display:flex; flex-direction:column; height:100vh }
 
     .guild{ position:relative; height:120px; background:url("wolfpac.gif") center/cover no-repeat; border-bottom:1px solid #1f2024; overflow:hidden }
     .guild::before{ content:""; position:absolute; inset:0; background:linear-gradient(0deg, rgba(0,0,0,.60), rgba(0,0,0,.35)) }
     .guild h1{ position:absolute; left:16px; bottom:12px; margin:0; font-size:22px; font-weight:800; letter-spacing:.4px; color:#fff; display:flex; gap:8px;
       text-shadow:0 2px 6px rgba(0,0,0,.65), 0 0 12px rgba(0,0,0,.35) }
-    .guild .wolf{ filter:drop-shadow(0 2px 4px rgba(0,0,0,.5)) }
 
     .cat{ padding:10px 12px; font-weight:700; color:#cdd0d4; letter-spacing:.3px }
-
     .channel-header{ padding:12px 16px; background:var(--bg-2); border-bottom:1px solid #1f2024; display:flex; gap:10px; font-weight:700 }
     .muted{ color:var(--muted) }
 
@@ -40,21 +38,26 @@
     .att{ margin-top:8px; display:flex; flex-wrap:wrap; gap:8px }
     .att img{ max-width:420px; height:auto; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
 
-    .calendar{ padding:10px 10px 14px; overflow:visible }
+    .calendar{ padding:10px 10px 14px }
     .cal{ background:#26282d; border:1px solid #1b1c20; border-radius:10px; width:100% }
     .cal-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px; border-bottom:1px solid #1b1c20 }
     .cal-side{ display:flex; align-items:center; gap:8px; flex-wrap:nowrap }
 
     .cal-head button,
     .cal-head select{
-      background:#1f2024; color:#d6d8dd; border:1px solid #16171a; border-radius:6px; padding:8px 12px; white-space:nowrap;
-      /* KEY: >=16px stops iOS focus-zoom */
-      font-size:16px;
+      background:#1f2024; color:#d6d8dd; border:1px solid #16171a; border-radius:6px; padding:10px 12px;
+      font-size:16px; /* stops iOS focus zoom */
+      touch-action: manipulation;
     }
 
     .cal-week{ display:grid; grid-template-columns:repeat(7,1fr); padding:6px 8px; color:#b7bac0; font-size:12px; letter-spacing:.3px }
-    .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; padding:0 8px 10px 8px }
-    .day{ position:relative; aspect-ratio:1/1; border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:600; border:1px solid #1b1c20; background:#202226; color:#d5d8dc }
+    .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; padding:0 8px 10px 8px; touch-action: manipulation; }
+    .day{
+      position:relative; aspect-ratio:1/1; border-radius:8px; display:flex; align-items:center; justify-content:center;
+      font-weight:600; border:1px solid #1b1c20; background:#202226; color:#d5d8dc;
+      font-size:16px;           /* treat taps as text big enough => no smart zoom */
+      touch-action: manipulation;/* no dbl-tap zoom */
+    }
     .day.muted{ opacity:.45 }
     .day.has{ cursor:pointer; background:#23262b }
     .day.has:hover{ outline:2px solid #3a4a84 }
@@ -64,32 +67,27 @@
 
     .search{ margin:14px 10px; padding:12px; background:#26282d; border:1px solid #1b1c20; border-radius:10px }
     .search-title{ font-weight:800; letter-spacing:.3px; margin-bottom:8px; display:flex; align-items:center; gap:6px }
-    .search .glass{ filter:drop-shadow(0 1px 2px rgba(0,0,0,.35)) }
     #search-form{ display:block }
     #search-input{
       width:100%; background:#1f2024; color:#e8eaed; border:1px solid #16171a; border-radius:8px; padding:12px 14px; outline:none;
-      font-size:16px; /* stop iOS zoom on focus */
+      font-size:16px; touch-action: manipulation;
     }
     #search-input::placeholder{ color:#9aa0a6 }
     .hl{ background:#5f5345; color:#fff; border-radius:4px; padding:0 2px }
 
-    /* Burger + collapsible on mobile */
     .burger-wrap{ display:none; padding:10px 16px }
     .burger{ width:100%; background:#26282d; color:#e8eaed; border:1px solid #1b1c20; border-radius:10px; padding:10px 0; font-weight:700; font-size:16px }
 
-    /* Mobile rules */
     @media (max-width: 860px){
       .layout{ grid-template-columns:1fr; height:auto; min-height:100vh }
       .left{ border-right:none }
       .burger-wrap{ display:block }
       .left-inner{ overflow:hidden; transition:max-height .25s ease }
       .left-inner.collapsed{ max-height:0 }
-      .left-inner.open{ max-height:1200px } /* big enough to show calendar+search */
-      /* clamp images fully on mobile — avoid sideways scroll */
-      .att img{ max-width:100% }
+      .left-inner.open{ max-height:1200px }
+      .att img{ max-width:100% } /* no sideways scroll on images */
     }
 
-    /* Just a little safety for any other controls */
     button, input, select, textarea { font-size:16px; }
   </style>
 </head>
@@ -99,12 +97,8 @@
       <div class="guild"><h1><span class="wolf">🐺</span> Wolfpac</h1></div>
       <div class="cat">🐺・Chats</div>
 
-      <!-- Burger (mobile) -->
-      <div class="burger-wrap">
-        <button id="burger" class="burger">≡ Menu</button>
-      </div>
+      <div class="burger-wrap"><button id="burger" class="burger">≡ Menu</button></div>
 
-      <!-- Collapsible contents -->
       <div id="leftInner" class="left-inner open">
         <div class="calendar">
           <div class="cal">
@@ -144,6 +138,16 @@
 <script>
 const API_BASE = "https://discordchats-9ef6930e36f8.herokuapp.com/api";
 const $ = (s) => document.querySelector(s);
+
+/* Kill iOS double-tap zoom globally (keeps taps snappy). */
+(function preventDoubleTapZoom(){
+  let last = 0;
+  document.addEventListener('touchend', function(e){
+    const now = Date.now();
+    if (now - last <= 300) { e.preventDefault(); }
+    last = now;
+  }, { passive:false });
+})();
 
 /* banners */
 function banner(msg, ok=true){
@@ -230,10 +234,7 @@ function renderCalendar(){
   const prevMonthDays = new Date(curY, curM, 0).getDate();
 
   const cells = [];
-  for (let i=prevDays-1; i>=0; i--){
-    const d = prevMonthDays - i;
-    cells.push({date:new Date(curY, curM-1, d), inMonth:false});
-  }
+  for (let i=prevDays-1; i>=0; i--) cells.push({date:new Date(curY, curM-1, prevMonthDays - i), inMonth:false});
   for (let d=1; d<=daysInMonth; d++) cells.push({date:new Date(curY, curM, d), inMonth:true});
   while (cells.length < totalCells){
     const idx = cells.length - (prevDays + daysInMonth) + 1;
@@ -258,9 +259,9 @@ function renderCalendar(){
         [...grid.children].forEach(el => el.classList.remove('selected'));
         day.classList.add('selected');
         await loadMessages(key);
-        // blur any focused control to avoid iOS sticky zoom
+        // extra belt & suspenders: ensure nothing remains focused
         if (document.activeElement) document.activeElement.blur();
-      });
+      }, { passive:true });
       if (selectedDay === key) day.classList.add('selected');
     }
     day.textContent = c.date.getDate();
@@ -382,14 +383,12 @@ async function doSearch(e){
     banner('Search failed.', false);
     $('#search-hint').textContent = 'Search failed.';
   }finally{
-    // blur so iOS doesn't keep zoom level
-    input.blur();
+    input.blur(); // collapse any zoomed focus
   }
 }
 
 /* ===== init ===== */
 window.addEventListener('DOMContentLoaded', () => {
-  // burger toggle (mobile)
   const burger = $('#burger'), inner = $('#leftInner');
   if (burger && inner){
     const set = (open) => { inner.classList.toggle('open', open); inner.classList.toggle('collapsed', !open); };
