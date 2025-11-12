@@ -1,174 +1,147 @@
 import os
 import logging
-from typing import Optional, List
-from datetime import date
+from typing import List, Optional, Dict, Any
 
-import boto3
 import asyncpg
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
 
-log = logging.getLogger("discordchats")
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL missing")
 
-app = FastAPI(title="discordchats.com")
+log = logging.getLogger("uvicorn.error")
 
-DB_URL = os.getenv("DATABASE_URL")
-ARCHIVE_TZ = os.getenv("ARCHIVE_TZ", "America/Chicago")
-
-# S3/MinIO (read-only is fine for website)
-STACKHERO_ENDPOINT = os.getenv("STACKHERO_S3_ENDPOINT") or os.getenv("STACKHERO_MINIO_HOST")
-if STACKHERO_ENDPOINT and not STACKHERO_ENDPOINT.startswith("http"):
-    STACKHERO_ENDPOINT = f"https://{STACKHERO_ENDPOINT}"
-STACKHERO_ACCESS_KEY = os.getenv("STACKHERO_S3_ACCESS_KEY") or os.getenv("STACKHERO_MINIO_ROOT_ACCESS_KEY")
-STACKHERO_SECRET_KEY = os.getenv("STACKHERO_S3_SECRET_KEY") or os.getenv("STACKHERO_MINIO_ROOT_SECRET_KEY")
-STACKHERO_BUCKET     = os.getenv("STACKHERO_S3_BUCKET") or os.getenv("STACKHERO_MINIO_BUCKET")
-S3_PREFIX = os.getenv("S3_PREFIX", "discord-archive/").strip()
-S3_PUBLIC_URL_BASE = os.getenv("S3_PUBLIC_URL_BASE", "").rstrip("/")
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # your site is same-origin, but this avoids CORS surprises
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _pool: Optional[asyncpg.Pool] = None
 
-def _s3_client():
-    if STACKHERO_ENDPOINT and STACKHERO_ACCESS_KEY and STACKHERO_SECRET_KEY and STACKHERO_BUCKET:
-        return boto3.client(
-            "s3",
-            endpoint_url=STACKHERO_ENDPOINT,
-            aws_access_key_id=STACKHERO_ACCESS_KEY,
-            aws_secret_access_key=STACKHERO_SECRET_KEY,
-        )
-    return None
 
 @app.on_event("startup")
-async def startup():
+async def _startup():
     global _pool
-    # Boot even if DB is missing (so we can see health endpoint)
-    if not DB_URL:
-        log.warning("DATABASE_URL not set; API will run but data queries will 503")
-        return
-    try:
-        _pool = await asyncpg.create_pool(DB_URL, min_size=1, max_size=5)
-        async with _pool.acquire() as conn:
-            # Sanity check a lightweight query
-            await conn.execute("SELECT 1;")
-        log.info("DB pool ready.")
-    except Exception as e:
-        log.exception("DB pool init failed: %s", e)
-        # Don’t crash; allow /health to show error
-        _pool = None
-
-@app.on_event("shutdown")
-async def shutdown():
-    global _pool
-    if _pool:
-        await _pool.close()
-        _pool = None
-
-class MessageRow(BaseModel):
-    message_id: int
-    guild_id: int
-    channel_id: int
-    user_id: int
-    display_name: str
-    ts_local_date: date
-    ts_local_time: str
-    role_color_1: Optional[str]
-    role_color_2: Optional[str]
-    avatar_url: Optional[str]
-    content: Optional[str]
-
-@app.get("/health")
-async def health():
-    ok = True
-    details = {}
-    if _pool is None:
-        ok = False
-        details["db"] = "unavailable"
-    else:
-        details["db"] = "ok"
-    details["s3_configured"] = bool(_s3_client() and STACKHERO_BUCKET)
-    return {"ok": ok, **details}
-
-@app.get("/dates")
-async def list_dates():
-    """Return all local dates that have messages (for calendar)."""
-    if _pool is None:
-        raise HTTPException(status_code=503, detail="DB unavailable")
-    sql = """
-        SELECT DISTINCT ts_local_date
-        FROM archived_messages
-        ORDER BY ts_local_date ASC
-    """
+    # Heroku PG often needs sslmode=require; if your URL doesn't include it,
+    # asyncpg still negotiates TLS, but we log the URL (without secrets) to be sure.
+    safe_url = DATABASE_URL.split("@")[-1]
+    log.info("DB: creating pool to %s", safe_url)
+    _pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
     async with _pool.acquire() as conn:
-        rows = await conn.fetch(sql)
-    return [r["ts_local_date"].isoformat() for r in rows]
+        # sanity query
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS archived_messages (
+            message_id      BIGINT PRIMARY KEY,
+            guild_id        BIGINT NOT NULL,
+            channel_id      BIGINT NOT NULL,
+            user_id         BIGINT NOT NULL,
+            display_name    TEXT   NOT NULL,
+            ts_utc          TIMESTAMPTZ NOT NULL,
+            ts_local_date   DATE   NOT NULL,
+            ts_local_time   TEXT   NOT NULL,
+            role_color_1    TEXT   NULL,
+            role_color_2    TEXT   NULL,
+            avatar_url      TEXT   NULL,
+            content         TEXT   NULL
+        );
+        """)
 
-@app.get("/messages")
-async def messages_for_date(
-    date_str: str = Query(..., description="YYYY-MM-DD in ARCHIVE_TZ"),
-    channel_id: Optional[int] = Query(None),
+
+@app.get("/api/health")
+async def health():
+    """Quick visibility: how many rows and earliest/latest date."""
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT COUNT(*) AS n,
+                       MIN(ts_local_date) AS min_date,
+                       MAX(ts_local_date) AS max_date
+                FROM archived_messages
+            """)
+        return dict(ok=True, count=row["n"], min_date=str(row["min_date"]) if row["min_date"] else None,
+                    max_date=str(row["max_date"]) if row["max_date"] else None)
+    except Exception as e:
+        log.exception("/api/health failed: %s", e)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/dates")
+async def dates():
+    """All dates with counts (ascending). Used to populate the calendar."""
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT ts_local_date AS d, COUNT(*) AS n
+                FROM archived_messages
+                GROUP BY ts_local_date
+                ORDER BY ts_local_date ASC
+            """)
+        return [{"date": str(r["d"]), "count": r["n"]} for r in rows]
+    except Exception as e:
+        log.exception("/api/dates failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/messages")
+async def messages(
+    date: str = Query(..., description="YYYY-MM-DD (local day)"),
     limit: int = Query(2000, ge=1, le=10000),
 ):
-    """Fetch messages for the chosen local date (optionally a single channel)."""
-    if _pool is None:
-        raise HTTPException(status_code=503, detail="DB unavailable")
-
+    """Messages for a given local date, ordered like Discord."""
     try:
-        d = date.fromisoformat(date_str)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid date format")
+        async with _pool.acquire() as conn:
+            msgs = await conn.fetch(
+                """
+                SELECT message_id, guild_id, channel_id, user_id, display_name,
+                       ts_utc, ts_local_date, ts_local_time,
+                       role_color_1, role_color_2, avatar_url, content
+                FROM archived_messages
+                WHERE ts_local_date = $1::date
+                ORDER BY ts_local_date ASC, ts_local_time ASC, message_id ASC
+                LIMIT $2
+                """,
+                date, limit
+            )
 
-    base_sql = """
-        SELECT message_id, guild_id, channel_id, user_id, display_name,
-               ts_local_date, ts_local_time, role_color_1, role_color_2,
-               avatar_url, content
-        FROM archived_messages
-        WHERE ts_local_date = $1
-    """
-    params: List = [d]
-    if channel_id:
-        base_sql += " AND channel_id = $2"
-        params.append(channel_id)
-    base_sql += " ORDER BY ts_local_time ASC, message_id ASC LIMIT $%d" % (len(params)+1)
-    params.append(limit)
+            # attachments (only ones we mirrored or original CDN fallback)
+            atts = await conn.fetch(
+                """
+                SELECT message_id,
+                       COALESCE(s3_url, url) AS href,
+                       filename, content_type, size_bytes
+                FROM archived_attachments
+                WHERE message_id = ANY($1::bigint[])
+                ORDER BY message_id, attachment_id
+                """,
+                [m["message_id"] for m in msgs] or [0],
+            )
+        by_mid: Dict[int, List[Dict[str, Any]]] = {}
+        for a in atts:
+            if not a["href"]:
+                continue
+            by_mid.setdefault(a["message_id"], []).append(
+                {"url": a["href"], "filename": a["filename"], "type": a["content_type"], "size": a["size_bytes"]}
+            )
 
-    async with _pool.acquire() as conn:
-        rows = await conn.fetch(base_sql, *params)
-    return [MessageRow(**dict(r)).model_dump() for r in rows]
-
-@app.get("/attachments")
-async def attachments_for_message(
-    message_id: int,
-):
-    """Fetch mirrored attachment URLs (prefer public s3_url if set)."""
-    if _pool is None:
-        raise HTTPException(status_code=503, detail="DB unavailable")
-    sql = """
-        SELECT attachment_id, filename, content_type, size_bytes,
-               url, proxy_url, s3_key, s3_url
-        FROM archived_attachments
-        WHERE message_id = $1
-        ORDER BY attachment_id ASC
-    """
-    async with _pool.acquire() as conn:
-        rows = await conn.fetch(sql, message_id)
-
-    out = []
-    for r in rows:
-        public = r["s3_url"]
-        if not public and r["s3_key"] and S3_PUBLIC_URL_BASE:
-            public = f"{S3_PUBLIC_URL_BASE}/{r['s3_key']}"
-        out.append({
-            "attachment_id": r["attachment_id"],
-            "filename": r["filename"],
-            "content_type": r["content_type"],
-            "size_bytes": r["size_bytes"],
-            "public_url": public,
-            "fallback_url": r["url"] or r["proxy_url"],
-        })
-    return out
-
-@app.get("/")
-async def root():
-    # Serve a tiny landing so Gunicorn boot proves out
-    return JSONResponse({"ok": True, "msg": "discordchats backend up", "health": "/health", "dates": "/dates", "messages": "/messages?date_str=YYYY-MM-DD"})
+        out = []
+        for m in msgs:
+            out.append({
+                "message_id": str(m["message_id"]),
+                "display_name": m["display_name"],
+                "avatar_url": m["avatar_url"],
+                "role_color_1": m["role_color_1"],
+                "role_color_2": m["role_color_2"],
+                "time": m["ts_local_time"],
+                "content": m["content"],
+                "attachments": by_mid.get(m["message_id"], []),
+            })
+        return out
+    except Exception as e:
+        log.exception("/api/messages failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
