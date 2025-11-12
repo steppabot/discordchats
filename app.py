@@ -1,17 +1,77 @@
 import os
 import logging
+import boto3
 from typing import List, Optional, Dict, Any
 import asyncpg
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import date as Date
+from urllib.parse import urlparse
 
+S3_ACCESS_KEY = os.getenv("STACKHERO_S3_ACCESS_KEY")
+S3_SECRET_KEY = os.getenv("STACKHERO_S3_SECRET_KEY")
+S3_BUCKET     = os.getenv("STACKHERO_S3_BUCKET")
+S3_ENDPOINT   = os.getenv("STACKHERO_S3_ENDPOINT")
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL missing")
 
 log = logging.getLogger("uvicorn.error")
+
+s3 = boto3.client(
+    "s3",
+    aws_access_key_id=S3_ACCESS_KEY,
+    aws_secret_access_key=S3_SECRET_KEY,
+    endpoint_url=f"https://{S3_ENDPOINT}",
+    region_name="us-east-1"  # or whatever Stackhero gives you
+)
+
+def presign_stackhero(key: str, expires_in: int = 86400) -> str:
+    """Return a temporary public URL to a private Stackhero S3 object."""
+    return s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": S3_BUCKET, "Key": key},
+        ExpiresIn=expires_in
+    )
+
+STACKHERO_HINTS = ("stackhero", ".s3.", ".object.", "amazonaws.com")  # loose check
+
+def _extract_s3_key(u: str) -> Optional[str]:
+    """
+    Given a full S3/Stackhero URL, return the object key (path without leading '/').
+    """
+    try:
+        p = urlparse(u)
+        key = p.path.lstrip("/")
+        return key or None
+    except Exception:
+        return None
+
+def _presign_if_stackhero(u: Optional[str]) -> Optional[str]:
+    """
+    If the URL points at your Stackhero/S3 bucket (or you just want to treat it like S3),
+    return a presigned URL. Otherwise return the original.
+    """
+    if not u:
+        return None
+    # Heuristic: presign if it looks like S3/Stackhero OR if it’s a bare key (no scheme).
+    if "://" not in u:
+        # looks like a key already
+        try:
+            return presign_stackhero(u)
+        except Exception:
+            return u
+
+    low = u.lower()
+    if any(h in low for h in STACKHERO_HINTS):
+        key = _extract_s3_key(u)
+        if key:
+            try:
+                return presign_stackhero(key)
+            except Exception:
+                return u
+    return u
 
 app = FastAPI()
 app.add_middleware(
@@ -90,7 +150,6 @@ async def dates():
         log.exception("/api/dates failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/messages")
 async def messages(
     date: str = Query(..., description="YYYY-MM-DD (local day)"),
@@ -119,10 +178,12 @@ async def messages(
                         COALESCE(
                           json_agg(
                             json_build_object(
-                              'url', COALESCE(a.s3_url, a.url),
+                              -- include BOTH fields so we can decide at the API layer
+                              's3_url', a.s3_url,
+                              'url',     a.url,
                               'filename', a.filename,
-                              'type', a.content_type,
-                              'size', a.size_bytes
+                              'type',     a.content_type,
+                              'size',     a.size_bytes
                             )
                           ) FILTER (WHERE a.attachment_id IS NOT NULL),
                           '[]'::json
@@ -156,18 +217,37 @@ async def messages(
                     """,
                     d, limit
                 )
+                # normalize to same shape
                 rows = [dict(r) | {"attachments": []} for r in rows]
 
-        return [{
-            "message_id": str(r["message_id"]),
-            "display_name": r["display_name"],
-            "avatar_url": r.get("avatar_url"),
-            "role_color_1": r.get("role_color_1"),
-            "role_color_2": r.get("role_color_2"),
-            "time": r.get("ts_local_time"),
-            "content": r.get("content"),
-            "attachments": r.get("attachments") or [],
-        } for r in rows]
+        out = []
+        for r in rows:
+            atts_in = r.get("attachments") or []
+            atts_out = []
+            for a in atts_in:
+                # Prefer s3_url if present; else url.
+                raw = a.get("s3_url") or a.get("url")
+                signed = _presign_if_stackhero(raw)
+
+                atts_out.append({
+                    "url": signed,
+                    "filename": a.get("filename"),
+                    "type": a.get("type"),
+                    "size": a.get("size"),
+                })
+
+            out.append({
+                "message_id": str(r["message_id"]),
+                "display_name": r["display_name"],
+                "avatar_url": r.get("avatar_url"),
+                "role_color_1": r.get("role_color_1"),
+                "role_color_2": r.get("role_color_2"),
+                "time": r.get("ts_local_time"),
+                "content": r.get("content"),
+                "attachments": atts_out,
+            })
+
+        return out
 
     except Exception as e:
         log.exception("/api/messages failed: %s", e)
