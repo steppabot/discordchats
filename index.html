@@ -28,8 +28,19 @@
     .avatar { width:44px; height:44px; border-radius:50%; object-fit:cover; background:#111; flex:0 0 auto; }
     .name { font-weight:700 }
     .content { white-space:pre-wrap; margin-top:4px; overflow-wrap:anywhere; word-break:break-word; }
+
+    /* Attachments */
     .att { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; max-width:100%; }
-    .att img { display:block; height:auto; max-width:420px; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
+    .att img, .att video { display:block; height:auto; max-width:420px; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
+
+    /* Non-image/video file presentation */
+    .file-pill {
+      display:inline-flex; align-items:center; gap:8px;
+      background:#22252a; color:#cfd3da; border:1px solid #16171a;
+      border-radius:8px; padding:8px 10px; text-decoration:none;
+      max-width:min(420px,100%); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    .file-pill:hover { background:#262a30; border-color:#1b1f25 }
 
     .calendar { padding:10px 10px 14px; }
     .cal { background:#26282d; border:1px solid #1b1c20; border-radius:10px; width:100%; }
@@ -68,7 +79,8 @@
       .feed{ padding:12px; }
       /* Clamp images fully to viewport width, kill horizontal scroll */
       .att, .feed{ overflow-x:hidden; }
-      .att img{ max-width:100%; width:100%; }
+      .att img, .att video{ max-width:100%; width:100%; }
+      html, body { overflow-x:hidden; }
     }
   </style>
 </head>
@@ -148,6 +160,55 @@ function paintName(el, c1) {
   el.style.color = color;
 }
 
+/* ============================
+   Attachment helpers (robust)
+============================ */
+function makeFilePill(href, label) {
+  const a = document.createElement('a');
+  a.className = 'file-pill';
+  a.target = '_blank';
+  a.rel = 'noreferrer noopener';
+  a.href = href;
+  a.textContent = label || (href || '').split('/').pop() || 'Open file';
+  return a;
+}
+function isImageLike(src, mime) {
+  if (mime && mime.toLowerCase().startsWith('image/')) return true;
+  return /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(src || '');
+}
+function isVideoLike(src, mime) {
+  if (mime && mime.toLowerCase().startsWith('video/')) return true;
+  return /\.(mp4|webm|mov)$/i.test(src || '');
+}
+function buildAttachmentEl(a){
+  const src = a.s3_url || a.url;   // prefer S3 when present
+  const ct  = (a.type || '').toLowerCase();
+  const name = a.filename || (src ? src.split('/').pop() : 'file');
+  if (!src) return null;
+
+  if (isImageLike(src, ct)) {
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.referrerPolicy = 'no-referrer';
+    img.alt = name || '';
+    img.src = src;
+    img.onerror = () => { img.replaceWith(makeFilePill(src, name)); };
+    return img;
+  }
+  if (isVideoLike(src, ct)) {
+    const v = document.createElement('video');
+    v.controls = true;
+    v.playsInline = true;
+    v.preload = 'metadata';
+    v.src = src;
+    v.onerror = () => { v.replaceWith(makeFilePill(src, name)); };
+    return v;
+  }
+  return makeFilePill(src, name);
+}
+
+/* Message rows */
 function messageRow(m) {
   const row = document.createElement('div'); row.className='row';
   const av = document.createElement('img'); av.className='avatar';
@@ -166,9 +227,8 @@ function messageRow(m) {
   const attWrap = document.createElement('div'); attWrap.className='att';
   if (Array.isArray(m.attachments)) {
     for (const a of m.attachments) {
-      const src = a.url || a.s3_url; if (!src) continue;
-      const img = document.createElement('img'); img.src = src; img.alt = a.filename || '';
-      attWrap.append(img);
+      const el = buildAttachmentEl(a || {});
+      if (el) attWrap.append(el);
     }
   }
   body.append(head, content, attWrap);
@@ -238,7 +298,7 @@ function renderCalendar() {
         [...grid.children].forEach(el => el.classList.remove('selected'));
         day.classList.add('selected');
         await loadMessages(key);
-        // Keep viewport from jumping/zooming on iOS after click
+        // keep viewport steady on iOS
         window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
       });
       if (selectedDay === key) day.classList.add('selected');
@@ -293,7 +353,7 @@ async function loadMessages(dateStr) {
   }
 }
 
-/* ---------- Search (newest → oldest already handled server-side now) ---------- */
+/* ---------- Search (newest → oldest handled server-side) ---------- */
 let currentSearch = "";
 async function fetchSearch(q, limit=1000, offset=0){
   const url = `${API_BASE}/search?` + new URLSearchParams({ q, limit, offset });
@@ -334,9 +394,8 @@ function messageRowWithHL(m, query){
   const attWrap = document.createElement('div'); attWrap.className='att';
   if (Array.isArray(m.attachments)) {
     for (const a of m.attachments) {
-      const src = a.url || a.s3_url; if (!src) continue;
-      const img = document.createElement('img'); img.src = src; img.alt = a.filename || '';
-      attWrap.append(img);
+      const el = buildAttachmentEl(a || {});
+      if (el) attWrap.append(el);
     }
   }
   body.append(head, content, attWrap);
