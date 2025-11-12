@@ -20,9 +20,40 @@
       flex-direction: column; 
       overflow: hidden; 
     }
-    .guild { padding:14px 12px; border-bottom:1px solid #1f2024; display:flex; align-items:center; gap:10px; background:var(--bg-2) }
+    .guild{
+      position: relative;
+      height: 120px;                 /* tweak 100–140px if you want */
+      padding: 0;
+      background: url("wolfpac.gif") center/cover no-repeat; /* full-bleed GIF */
+      border-bottom: 1px solid #1f2024;
+      overflow: hidden;
+    }
+    /* dark gradient overlay (50–65% opacity) */
+    .guild::before{
+      content:"";
+      position:absolute; inset:0;
+      background:
+        linear-gradient(0deg, rgba(0,0,0,.60), rgba(0,0,0,.35)); /* top↔bottom */
+      /* If you prefer side fade instead, use 90deg */
+      /* background: linear-gradient(90deg, rgba(0,0,0,.65), rgba(0,0,0,.4)); */
+    }
     .guild img { height:28px; border-radius:4px }
-    .guild h1 { margin:0; font-size:16px; font-weight:700; letter-spacing:.3px }
+    /* overlay title */
+    .guild h1{
+      position:absolute; left:16px; bottom:12px;
+      margin:0;
+      font-size:22px; font-weight:800; letter-spacing:.4px;
+      color:#fff;
+      display:flex; align-items:center; gap:8px;
+      text-shadow: 0 2px 6px rgba(0,0,0,.65), 0 0 12px rgba(0,0,0,.35);
+    }
+    /* wolf emoji w/ subtle pop */
+    .guild h1 .wolf{
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,.5));
+      transform: translateY(-1px);
+    }
+    /* if the old <img> remains, hide it */
+    .guild img{ display:none; }
     .cat { padding:10px 12px; font-weight:700; color:#cdd0d4; letter-spacing:.3px }
     .center { display:flex; flex-direction:column; height:100vh }
     .channel-header { padding:12px 16px; background:var(--bg-2); border-bottom:1px solid #1f2024; display:flex; align-items:center; gap:10px; font-weight:700 }
@@ -107,8 +138,7 @@
   <div class="layout">
     <aside class="left">
       <div class="guild">
-        <img src="wolfpac.gif" alt="Wolfpac" />
-        <h1>Wolfpac</h1>
+        <h1><span class="wolf">🐺</span> Wolfpac</h1>
       </div>
       <div class="cat">🐺・Chats</div>
       <div class="calendar">
