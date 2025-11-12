@@ -2,88 +2,74 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>DiscordChats — Wolfpac</title>
   <style>
     :root { --bg:#202225; --bg-2:#2f3136; --bg-3:#36393f; --text:#e5e7eb; --muted:#a3a6aa; --accent:#ed4245; --brand:#7289da; }
     * { box-sizing:border-box }
-    html, body { height:100% }
-    body{
-      margin:0; background:var(--bg-3); color:var(--text);
-      font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-      -webkit-text-size-adjust:100%; text-size-adjust:100%;
-      overflow-x:hidden; touch-action: manipulation;
+    html,body{ margin:0; width:100%; max-width:100%; background:var(--bg-3); color:var(--text); font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; -webkit-text-size-adjust:100%; overflow-x:hidden; }
+
+    /* --- Prevent iOS zoom-on-focus --- */
+    input, select, button, textarea { font-size:16px; }
+
+    .layout { display:grid; grid-template-columns:380px 1fr; height:100vh; }
+    .left { background:var(--bg-2); border-right:1px solid #1f2024; display:flex; flex-direction:column; overflow:auto; }
+    .guild{ position:relative; height:120px; background:url("wolfpac.gif") center/cover no-repeat; border-bottom:1px solid #1f2024; overflow:hidden; }
+    .guild::before{ content:""; position:absolute; inset:0; background:linear-gradient(0deg, rgba(0,0,0,.60), rgba(0,0,0,.35)); }
+    .guild h1{ position:absolute; left:16px; bottom:12px; margin:0; font-size:22px; font-weight:800; letter-spacing:.4px; color:#fff; display:flex; align-items:center; gap:8px; text-shadow:0 2px 6px rgba(0,0,0,.65), 0 0 12px rgba(0,0,0,.35); }
+    .cat { padding:10px 12px; font-weight:700; color:#cdd0d4; letter-spacing:.3px }
+
+    .center { display:flex; flex-direction:column; height:100vh }
+    .channel-header { padding:12px 16px; background:var(--bg-2); border-bottom:1px solid #1f2024; display:flex; align-items:center; gap:10px; font-weight:700 }
+    .muted { color:var(--muted) }
+    .feed { padding:14px 16px; overflow:auto }
+
+    .row { display:flex; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.04); align-items:flex-start; }
+    .avatar { width:44px; height:44px; border-radius:50%; object-fit:cover; background:#111; flex:0 0 auto; }
+    .name { font-weight:700 }
+    .content { white-space:pre-wrap; margin-top:4px; overflow-wrap:anywhere; word-break:break-word; }
+    .att { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; max-width:100%; }
+    .att img { display:block; height:auto; max-width:420px; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
+
+    .calendar { padding:10px 10px 14px; }
+    .cal { background:#26282d; border:1px solid #1b1c20; border-radius:10px; width:100%; }
+    .cal-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px; border-bottom:1px solid #1b1c20; flex-wrap:wrap; }
+    .cal-side{ display:flex; align-items:center; gap:8px; }
+    .cal-head button, .cal-head select{
+      background:#1f2024; color:#d6d8dd; border:1px solid #16171a; border-radius:6px; padding:8px 10px; cursor:pointer; white-space:nowrap;
     }
-
-    .layout{ display:grid; grid-template-columns:380px 1fr; height:100vh }
-    .left{ background:var(--bg-2); border-right:1px solid #1f2024; display:flex; flex-direction:column; overflow:auto }
-    .center{ display:flex; flex-direction:column; height:100vh }
-
-    .guild{ position:relative; height:120px; background:url("wolfpac.gif") center/cover no-repeat; border-bottom:1px solid #1f2024; overflow:hidden }
-    .guild::before{ content:""; position:absolute; inset:0; background:linear-gradient(0deg, rgba(0,0,0,.60), rgba(0,0,0,.35)) }
-    .guild h1{ position:absolute; left:16px; bottom:12px; margin:0; font-size:22px; font-weight:800; letter-spacing:.4px; color:#fff; display:flex; gap:8px; text-shadow:0 2px 6px rgba(0,0,0,.65), 0 0 12px rgba(0,0,0,.35) }
-
-    .cat{ padding:10px 12px; font-weight:700; color:#cdd0d4; letter-spacing:.3px }
-    .channel-header{ padding:12px 16px; background:var(--bg-2); border-bottom:1px solid #1f2024; display:flex; gap:10px; font-weight:700 }
-    .muted{ color:var(--muted) }
-
-    .feed{ padding:14px 16px; overflow:auto }
-    .row{ display:flex; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.04) }
-    .avatar{ width:44px; height:44px; border-radius:50%; object-fit:cover; background:#111 }
-    .name{ font-weight:700 }
-    .content{ white-space:pre-wrap; margin-top:4px }
-    .att{ margin-top:8px; display:flex; flex-wrap:wrap; gap:8px }
-    .att img{ max-width:420px; height:auto; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
-
-    .calendar{ padding:10px 10px 14px }
-    .cal{ background:#26282d; border:1px solid #1b1c20; border-radius:10px; width:100%; max-width:100vw }
-    .cal-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px; border-bottom:1px solid #1b1c20 }
-    .cal-side{ display:flex; align-items:center; gap:8px; flex-wrap:nowrap }
-
-    .cal-head button,
-    .cal-head select{
-      background:#1f2024; color:#d6d8dd; border:1px solid #16171a; border-radius:6px; padding:10px 12px;
-      font-size:16px; touch-action: manipulation;
-    }
-
-    .cal-week{ display:grid; grid-template-columns:repeat(7,1fr); padding:6px 8px; color:#b7bac0; font-size:12px; letter-spacing:.3px }
-    .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; padding:0 8px 10px 8px; touch-action: manipulation; max-width:100% }
-    .day{
-      position:relative; aspect-ratio:1/1; border-radius:8px; display:flex; align-items:center; justify-content:center;
-      font-weight:600; border:1px solid #1b1c20; background:#202226; color:#d5d8dc;
-      font-size:16px; touch-action: manipulation; user-select:none;
-    }
+    .cal-week{ display:grid; grid-template-columns:repeat(7,1fr); padding:6px 8px; color:#b7bac0; font-size:12px; letter-spacing:.3px; }
+    .cal-grid{ display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; padding:0 8px 10px 8px; }
+    .day{ position:relative; aspect-ratio:1/1; border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:600; border:1px solid #1b1c20; background:#202226; color:#d5d8dc }
     .day.muted{ opacity:.45 }
     .day.has{ cursor:pointer; background:#23262b }
     .day.has:hover{ outline:2px solid #3a4a84 }
-    .day.selected{ outline:2px solid var(--brand); box-shadow:0 0 0 2px rgba(114,137,218,.25) inset }
+    .day.selected{ outline:2px solid var(--brand); box-shadow:0 0 0 2px rgba(114,137,218,.25) inset; }
     .dot{ position:absolute; bottom:6px; right:6px; width:8px; height:8px; border-radius:50%; background:#4ade80 }
     .count{ position:absolute; top:6px; right:6px; font-size:10px; color:#aeb4ba }
 
-    .search{ margin:14px 10px; padding:12px; background:#26282d; border:1px solid #1b1c20; border-radius:10px }
-    .search-title{ font-weight:800; letter-spacing:.3px; margin-bottom:8px; display:flex; align-items:center; gap:6px }
+    .search{ margin:14px 10px 14px; padding:12px; background:#26282d; border:1px solid #1b1c20; border-radius:10px; }
+    .search-title{ font-weight:800; letter-spacing:.3px; margin-bottom:8px; display:flex; align-items:center; gap:6px; }
     #search-form{ display:block }
     #search-input{
-      width:100%; background:#1f2024; color:#e8eaed; border:1px solid #16171a; border-radius:8px; padding:12px 14px; outline:none;
-      font-size:16px; touch-action: manipulation;
+      width:100%;
+      background:#1f2024; color:#e8eaed;
+      border:1px solid #16171a; border-radius:8px; padding:12px;
+      outline:none;
     }
     #search-input::placeholder{ color:#9aa0a6 }
-    .hl{ background:#5f5345; color:#fff; border-radius:4px; padding:0 2px }
+    .hl{ background:#5f5345; color:#fff; border-radius:4px; padding:0 2px; }
 
-    .burger-wrap{ display:none; padding:10px 16px }
-    .burger{ width:100%; background:#26282d; color:#e8eaed; border:1px solid #1b1c20; border-radius:10px; padding:10px 0; font-weight:700; font-size:16px }
-
-    @media (max-width: 860px){
-      .layout{ grid-template-columns:1fr; height:auto; min-height:100vh }
-      .left{ border-right:none }
-      .burger-wrap{ display:block }
-      .left-inner{ overflow:hidden; transition:max-height .25s ease }
-      .left-inner.collapsed{ max-height:0 }
-      .left-inner.open{ max-height:1200px }
-      .att img{ max-width:100% } /* clamp images on mobile only */
+    /* --- Mobile tweaks --- */
+    @media (max-width: 980px){
+      .layout{ grid-template-columns:1fr; height:auto; }
+      .left{ order:-1; }
+      .avatar{ width:36px; height:36px; }
+      .feed{ padding:12px; }
+      /* Clamp images fully to viewport width, kill horizontal scroll */
+      .att, .feed{ overflow-x:hidden; }
+      .att img{ max-width:100%; width:100%; }
     }
-
-    button, input, select, textarea { font-size:16px; }
   </style>
 </head>
 <body>
@@ -92,19 +78,22 @@
       <div class="guild"><h1><span class="wolf">🐺</span> Wolfpac</h1></div>
       <div class="cat">🐺・Chats</div>
 
-      <div class="burger-wrap"><button id="burger" class="burger" type="button">≡ Menu</button></div>
+      <!-- Mobile menu toggle -->
+      <div class="search" style="margin-top:0;margin-bottom:10px;">
+        <button id="menu-toggle" style="width:100%; padding:10px 12px; background:#1f2024; color:#e8eaed; border:1px solid #16171a; border-radius:8px;">≡ Menu</button>
+      </div>
 
-      <div id="leftInner" class="left-inner open">
+      <div id="menu-panel">
         <div class="calendar">
           <div class="cal">
             <div class="cal-head">
               <div class="cal-side cal-left">
-                <button id="prev" type="button">Prev</button>
-                <select id="month" aria-label="Month"></select>
+                <button id="prev">Prev</button>
+                <select id="month"></select>
               </div>
               <div class="cal-side cal-right">
-                <select id="year" aria-label="Year"></select>
-                <button id="next" type="button">Next</button>
+                <select id="year"></select>
+                <button id="next">Next</button>
               </div>
             </div>
             <div class="cal-week">
@@ -117,9 +106,9 @@
         <div class="search">
           <div class="search-title">Search <span class="glass">🔍</span></div>
           <form id="search-form" action="javascript:;" novalidate autocomplete="off">
-            <input id="search-input" inputmode="search" autocapitalize="off" spellcheck="false" type="text" placeholder="Find messages…" />
+            <input id="search-input" type="text" placeholder="Find messages…" />
           </form>
-          <div id="search-hint" class="muted" style="margin-top:6px;font-size:12px;"></div>
+          <div id="search-hint" class="muted" style="margin-top:6px; font-size:12px;"></div>
         </div>
       </div>
     </aside>
@@ -134,34 +123,24 @@
 const API_BASE = "https://discordchats-9ef6930e36f8.herokuapp.com/api";
 const $ = (s) => document.querySelector(s);
 
-/* Force the viewport back to scale=1 after any interaction that could trigger iOS zoom */
-function resetViewport(){
-  const vp = document.querySelector('meta[name=viewport]');
-  if (vp){
-    // flip-flop content to convince iOS to reapply scale 1
-    const base = 'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
-    vp.setAttribute('content', base);
-  }
-  if (document.activeElement) document.activeElement.blur();
-}
-
 /* banners */
 function banner(msg, ok=true){
   const bar = document.createElement('div');
-  bar.style.cssText = `background:${ok?'#165c2e':'#8b1d1d'};color:#fff;padding:10px 14px;font:14px/1.3 system-ui,Segoe UI,Roboto;border-bottom:1px solid #0003;position:sticky;top:0;z-index:50`;
+  bar.style.cssText = `background:${ok?'#165c2e':'#8b1d1d'};color:#fff;padding:10px 14px;font:14px/1.3 system-ui,Segoe UI,Roboto;border-bottom:1px solid #0003`;
   bar.textContent = msg;
   document.body.prepend(bar);
 }
 
-async function fetchJSON(path){
-  const res = await fetch(`${API_BASE}${path}`, { credentials:'omit' });
-  if (!res.ok) throw new Error(`${path} → ${res.status}`);
+async function fetchJSON(path) {
+  const url = `${API_BASE}${path}`;
+  const res = await fetch(url, {credentials:'omit'});
+  if (!res.ok) throw new Error(`${url} → ${res.status}`);
   return res.json();
 }
 
-function paintName(el, c1){
+function paintName(el, c1) {
   let color = '#ed4245';
-  if (c1 && typeof c1 === 'string'){
+  if (c1 && typeof c1 === 'string') {
     const s = c1.trim();
     if (/^#(?:[0-9a-f]{3}){1,2}$/i.test(s)) color = s;
   }
@@ -169,7 +148,7 @@ function paintName(el, c1){
   el.style.color = color;
 }
 
-function messageRow(m){
+function messageRow(m) {
   const row = document.createElement('div'); row.className='row';
   const av = document.createElement('img'); av.className='avatar';
   av.src = m.avatar_url || 'https://cdn.discordapp.com/embed/avatars/0.png';
@@ -179,33 +158,31 @@ function messageRow(m){
   const name = document.createElement('span'); name.className='name'; name.textContent = m.display_name || 'Unknown';
   paintName(name, m.role_color_1);
   const wolf = document.createElement('span'); wolf.textContent='🐺';
-  const time = document.createElement('span'); time.className='muted'; time.style.fontSize='12px';
-  time.textContent = m.time || m.ts_local_time || '';
+  const time = document.createElement('span'); time.className='muted'; time.style.fontSize='12px'; time.textContent = m.time || m.ts_local_time || '';
   head.append(name, wolf, time);
 
   const content = document.createElement('div'); content.className='content'; content.textContent = m.content || '';
 
   const attWrap = document.createElement('div'); attWrap.className='att';
-  if (Array.isArray(m.attachments)){
-    for (const a of m.attachments){
+  if (Array.isArray(m.attachments)) {
+    for (const a of m.attachments) {
       const src = a.url || a.s3_url; if (!src) continue;
       const img = document.createElement('img'); img.src = src; img.alt = a.filename || '';
       attWrap.append(img);
     }
   }
-
   body.append(head, content, attWrap);
   row.append(av, body);
   return row;
 }
 
-/* ========= Calendar ========= */
+/* ---------- Calendar state ---------- */
 let avail = new Map();
 let months = new Set();
 let curY, curM;
 let selectedDay = null;
 
-function fillMonthYearRanges(){
+function fillMonthYearRanges() {
   const mo = $('#month'), yr = $('#year');
   const names = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   mo.innerHTML = names.map((n,i)=>`<option value="${i}">${n}</option>`).join('');
@@ -216,9 +193,9 @@ function fillMonthYearRanges(){
   yr.innerHTML = yopt;
 }
 
-function renderCalendar(){
+function renderCalendar() {
   $('#month').value = String(curM);
-  $('#year').value  = String(curY);
+  $('#year').value = String(curY);
 
   const grid = $('#cal-grid'); grid.innerHTML = '';
   const first = new Date(curY, curM, 1);
@@ -230,64 +207,63 @@ function renderCalendar(){
   const prevMonthDays = new Date(curY, curM, 0).getDate();
 
   const cells = [];
-  for (let i=prevDays-1; i>=0; i--) cells.push({date:new Date(curY, curM-1, prevMonthDays - i), inMonth:false});
-  for (let d=1; d<=daysInMonth; d++) cells.push({date:new Date(curY, curM, d), inMonth:true});
-  while (cells.length < totalCells){
+  for (let i=prevDays-1; i>=0; i--) {
+    const d = prevMonthDays - i;
+    const date = new Date(curY, curM-1, d);
+    cells.push({date, inMonth:false});
+  }
+  for (let d=1; d<=daysInMonth; d++) {
+    cells.push({date:new Date(curY, curM, d), inMonth:true});
+  }
+  while (cells.length < totalCells) {
     const idx = cells.length - (prevDays + daysInMonth) + 1;
     cells.push({date:new Date(curY, curM+1, idx), inMonth:false});
   }
 
-  for (const c of cells){
+  for (const c of cells) {
     const yyyy = c.date.getFullYear();
     const mm = String(c.date.getMonth()+1).padStart(2,'0');
     const dd = String(c.date.getDate()).padStart(2,'0');
     const key = `${yyyy}-${mm}-${dd}`;
     const day = document.createElement('div');
     day.className = 'day' + (c.inMonth ? '' : ' muted');
-    day.dataset.key = key;
-
     const count = avail.get(key);
-    if (count && c.inMonth){
+    if (count && c.inMonth) {
       day.classList.add('has');
       day.title = `${count.toLocaleString()} messages`;
       const badge = document.createElement('div'); badge.className='dot'; day.append(badge);
       const cnt = document.createElement('div'); cnt.className='count'; cnt.textContent = count>999 ? '999+' : String(count); day.append(cnt);
-
-      // Desktop: click
-      day.addEventListener('click', () => selectDay(key, day));
-
-      // Mobile: handle via touch to block smart-zoom
-      day.addEventListener('touchend', (e) => {
-        e.preventDefault(); e.stopPropagation();
-        selectDay(key, day);
-      }, { passive:false });
-
+      day.addEventListener('click', async () => {
+        selectedDay = key;
+        [...grid.children].forEach(el => el.classList.remove('selected'));
+        day.classList.add('selected');
+        await loadMessages(key);
+        // Keep viewport from jumping/zooming on iOS after click
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      });
       if (selectedDay === key) day.classList.add('selected');
     }
-
     day.textContent = c.date.getDate();
     grid.append(day);
   }
 }
 
-async function selectDay(key, el){
-  selectedDay = key;
-  document.querySelectorAll('#cal-grid .day').forEach(d => d.classList.remove('selected'));
-  if (el) el.classList.add('selected');
-  await loadMessages(key);
-  resetViewport();
-}
+$('#prev').addEventListener('click', () => {
+  if (curM === 0) { curM=11; curY--; } else { curM--; }
+  renderCalendar();
+});
+$('#next').addEventListener('click', () => {
+  if (curM === 11) { curM=0; curY++; } else { curM++; }
+  renderCalendar();
+});
+$('#month').addEventListener('change', e => { curM = +e.target.value; renderCalendar(); });
+$('#year').addEventListener('change', e => { curY = +e.target.value; renderCalendar(); });
 
-$('#prev').addEventListener('click', () => { if (curM===0){curM=11;curY--;} else curM--; renderCalendar(); resetViewport(); });
-$('#next').addEventListener('click', () => { if (curM===11){curM=0;curY++;} else curM++; renderCalendar(); resetViewport(); });
-$('#month').addEventListener('change', e => { curM = +e.target.value; renderCalendar(); resetViewport(); });
-$('#year').addEventListener('change',  e => { curY = +e.target.value; renderCalendar(); resetViewport(); });
-
-async function loadDates(){
-  try{
+async function loadDates() {
+  try {
     const dates = await fetchJSON('/dates');   // [{date, count}]
     avail.clear(); months.clear();
-    for (const d of dates){
+    for (const d of dates) {
       const day = d.date || d.ts_local_date || d;
       avail.set(day, d.count ?? 0);
       months.add(day.slice(0,7));
@@ -299,25 +275,25 @@ async function loadDates(){
     curY = +y; curM = +m - 1;
     renderCalendar();
     await loadMessages(latest);
-  }catch(e){
+  } catch (e) {
     console.error(e); banner('Failed to load dates.', false);
   }
 }
 
-async function loadMessages(dateStr){
-  try{
-    $('#channel-title').textContent = `# chat-archive — ${dateStr}`;
+async function loadMessages(dateStr) {
+  try {
+    document.getElementById('channel-title').textContent = `# chat-archive — ${dateStr}`;
     const msgs = await fetchJSON(`/messages?date=${encodeURIComponent(dateStr)}`);
-    const wrap = $('#messages'); wrap.innerHTML = '';
+    const wrap = document.getElementById('messages'); wrap.innerHTML = '';
     for (const m of msgs) wrap.append(messageRow(m));
-    $('#count').textContent = msgs.length ? `(${msgs.length.toLocaleString()} msgs)` : '(0 msgs)';
+    document.getElementById('count').textContent = msgs.length ? `(${msgs.length.toLocaleString()} msgs)` : '(0 msgs)';
     if (!msgs.length) wrap.innerHTML = '<div class="muted">No messages for this day.</div>';
-  }catch(e){
+  } catch (e) {
     console.error(e); banner('Failed to load messages.', false);
   }
 }
 
-/* ========= SEARCH ========= */
+/* ---------- Search (newest → oldest already handled server-side now) ---------- */
 let currentSearch = "";
 async function fetchSearch(q, limit=1000, offset=0){
   const url = `${API_BASE}/search?` + new URLSearchParams({ q, limit, offset });
@@ -325,7 +301,6 @@ async function fetchSearch(q, limit=1000, offset=0){
   if (!res.ok) throw new Error(`/search ${res.status}`);
   return res.json();
 }
-
 function setContentWithHighlight(containerEl, text, query){
   containerEl.textContent = "";
   if (!query){ containerEl.textContent = text || ""; return; }
@@ -335,11 +310,10 @@ function setContentWithHighlight(containerEl, text, query){
     const idx = src.toLowerCase().indexOf(q, i);
     if (idx === -1){ containerEl.append(document.createTextNode(src.slice(i))); break; }
     if (idx > i) containerEl.append(document.createTextNode(src.slice(i, idx)));
-    const mark = document.createElement("span"); mark.className="hl"; mark.textContent = src.slice(idx, idx+q.length);
+    const mark = document.createElement("span"); mark.className = "hl"; mark.textContent = src.slice(idx, idx + q.length);
     containerEl.append(mark); i = idx + q.length;
   }
 }
-
 function messageRowWithHL(m, query){
   const row = document.createElement('div'); row.className='row';
   const av = document.createElement('img'); av.className='avatar';
@@ -358,8 +332,8 @@ function messageRowWithHL(m, query){
   setContentWithHighlight(content, m.content || '', query);
 
   const attWrap = document.createElement('div'); attWrap.className='att';
-  if (Array.isArray(m.attachments)){
-    for (const a of m.attachments){
+  if (Array.isArray(m.attachments)) {
+    for (const a of m.attachments) {
       const src = a.url || a.s3_url; if (!src) continue;
       const img = document.createElement('img'); img.src = src; img.alt = a.filename || '';
       attWrap.append(img);
@@ -371,50 +345,55 @@ function messageRowWithHL(m, query){
 }
 
 async function doSearch(e){
-  if (e){ e.preventDefault(); e.stopPropagation(); }
-  const input = $('#search-input');
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  const input = document.getElementById('search-input');
   const q = (input.value || '').trim();
   if (!q) return;
 
   currentSearch = q;
-  $('#channel-title').textContent = `# search — "${q}"`;
-  $('#count').textContent = '';
-  $('#search-hint').textContent = 'Searching…';
+  document.getElementById('channel-title').textContent = `# search — "${q}"`;
+  document.getElementById('count').textContent = '';
+  document.getElementById('search-hint').textContent = 'Searching…';
 
-  try{
-    const { rows } = await fetchSearch(q, 2000, 0);
-    const wrap = $('#messages'); wrap.innerHTML = '';
+  try {
+    const { ok, rows } = await fetchSearch(q, 2000, 0);
+    const wrap = document.getElementById('messages');
+    wrap.innerHTML = '';
     for (const m of rows) wrap.append(messageRowWithHL(m, q));
-    $('#count').textContent = rows.length ? `(${rows.length.toLocaleString()} results)` : '(0 results)';
-    $('#search-hint').textContent = rows.length ? '' : 'No matches.';
-  }catch(err){
+    document.getElementById('count').textContent =
+      rows.length ? `(${rows.length.toLocaleString()} results)` : '(0 results)';
+    document.getElementById('search-hint').textContent = rows.length ? '' : 'No matches.';
+    // keep viewport steady on iOS
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  } catch (err) {
     console.error(err);
     banner('Search failed.', false);
-    $('#search-hint').textContent = 'Search failed.';
-  }finally{
-    input.blur();
-    resetViewport();
+    document.getElementById('search-hint').textContent = 'Search failed.';
   }
 }
 
-/* ===== init ===== */
+/* Mobile menu collapse */
+(function(){
+  const panel = document.getElementById('menu-panel');
+  const btn = document.getElementById('menu-toggle');
+  const mq = window.matchMedia('(max-width: 980px)');
+  function setInitial(){
+    if (mq.matches){ panel.style.display = 'block'; } else { panel.style.display = 'block'; }
+  }
+  btn.addEventListener('click', ()=> {
+    const vis = panel.style.display !== 'none';
+    panel.style.display = vis ? 'none' : 'block';
+  });
+  mq.addEventListener?.('change', setInitial);
+  setInitial();
+})();
+
+/* Boot */
 window.addEventListener('DOMContentLoaded', () => {
-  const burger = $('#burger'), inner = $('#leftInner');
-  if (burger && inner){
-    const set = (open) => { inner.classList.toggle('open', open); inner.classList.toggle('collapsed', !open); };
-    set(true);
-    burger.addEventListener('click', ()=> set(!inner.classList.contains('open')));
-  }
-
-  const form = $('#search-form');
-  if (form){
-    form.setAttribute('action','javascript:void(0)');
-    form.noValidate = true;
-    form.addEventListener('submit', doSearch);
-  }
-  const input = $('#search-input');
-  if (input){ input.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(e); }); }
-
+  const form = document.getElementById('search-form');
+  if (form) { form.setAttribute('action', 'javascript:void(0)'); form.noValidate = true; form.addEventListener('submit', doSearch); }
+  const input = document.getElementById('search-input');
+  if (input) { input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(e); }); }
   loadDates();
 });
 </script>
