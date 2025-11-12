@@ -54,7 +54,7 @@
   </div>
 
 <script>
-const API_BASE = "https://discordchats-9ef6930e36f8.herokuapp.com/api  // <-- your Heroku URL
+const API_BASE = "https://discordchats-9ef6930e36f8.herokuapp.com/api";  // Heroku backend
 
 const $ = (s) => document.querySelector(s);
 
@@ -90,7 +90,7 @@ function messageRow(m) {
   const name = document.createElement('span'); name.className='name'; name.textContent = m.display_name || 'Unknown';
   paintName(name, m.role_color_1, m.role_color_2);
   const wolf = document.createElement('span'); wolf.textContent='🐺';
-  const time = document.createElement('span'); time.className='muted'; time.style.fontSize='12px'; time.textContent = m.ts_local_time || m.time || '';
+  const time = document.createElement('span'); time.className='muted'; time.style.fontSize='12px'; time.textContent = m.time || '';
   head.append(name, wolf, time);
 
   const content = document.createElement('div'); content.className='content'; content.textContent = m.content || '';
@@ -98,7 +98,7 @@ function messageRow(m) {
   const attWrap = document.createElement('div'); attWrap.className='att';
   if (Array.isArray(m.attachments)) {
     for (const a of m.attachments) {
-      const src = a.s3_url || a.url || a.proxy_url;
+      const src = a.url; // backend sends {url, filename, type, size}
       if (!src) continue;
       const img = document.createElement('img'); img.src = src; img.alt = a.filename || '';
       attWrap.append(img);
@@ -112,35 +112,36 @@ function messageRow(m) {
 
 async function loadDates() {
   try {
-    const dates = await fetchJSON('/dates');
-    const list = $('#date-list'); list.innerHTML = '';
+    const dates = await fetchJSON('/dates'); // returns [{date, count}, ...]
+    const list = document.getElementById('date-list'); list.innerHTML = '';
     if (!dates.length) { list.innerHTML = '<div class="muted">No dates</div>'; return; }
 
     for (const d of dates) {
       const btn = document.createElement('button');
-      btn.className = 'date-btn'; btn.textContent = d.ts_local_date || d.date || d;
-      btn.onclick = () => loadMessages(btn.textContent, btn);
+      const label = d.date || d.ts_local_date || d;
+      btn.className = 'date-btn'; btn.textContent = label;
+      btn.onclick = () => loadMessages(label, btn);
       list.append(btn);
     }
-    // autoload last
     const last = list.lastElementChild; if (last) last.click();
   } catch(e){ console.error(e); showError('Failed to load dates.'); }
 }
 
 async function loadMessages(dateStr, btnEl) {
   try {
-    $('#channel-title').textContent = `# chat-archive — ${dateStr}`;
+    document.getElementById('channel-title').textContent = `# chat-archive — ${dateStr}`;
     if (btnEl) [...btnEl.parentNode.children].forEach(b=>b.classList.remove('active')), btnEl.classList.add('active');
 
-    const msgs = await fetchJSON(`/messages?date=${encodeURIComponent(date)}`);
-    const wrap = $('#messages'); wrap.innerHTML = '';
+    const msgs = await fetchJSON(`/messages?date=${encodeURIComponent(dateStr)}`); // <-- use dateStr
+    const wrap = document.getElementById('messages'); wrap.innerHTML = '';
     for (const m of msgs) wrap.append(messageRow(m));
-    $('#count').textContent = msgs.length ? `(${msgs.length.toLocaleString()} msgs)` : '(0 msgs)';
+    document.getElementById('count').textContent = msgs.length ? `(${msgs.length.toLocaleString()} msgs)` : '(0 msgs)';
     if (!msgs.length) wrap.innerHTML = '<div class="muted">No messages for this day.</div>';
   } catch(e){ console.error(e); showError('Failed to load messages.'); }
 }
 
 window.addEventListener('DOMContentLoaded', loadDates);
 </script>
+
 </body>
 </html>
