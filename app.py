@@ -283,6 +283,10 @@ async def messages(
             })
         return out
 
+    except Exception as e:
+        log.exception("/api/messages failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/messages")
 async def messages(
