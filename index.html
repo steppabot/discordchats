@@ -157,18 +157,22 @@
       width:min(560px, 95vw); background:#26282d; border:1px solid #1b1c20; border-radius:14px; padding:18px;
       box-shadow:0 10px 30px rgba(0,0,0,.45);
     }
-    .gate-title,
-    .gate-sub {
-      text-align: center;
-      width: 100%;
+    .gate-title {
+      text-align:center;
+      width:100%;
+      font-size:18px;
+      font-weight:700;
+      margin:0 0 4px;
     }
-    /* extra breathing room between subtitle and options */
+    
     .gate-sub {
-      margin-top:4px;
-      margin-bottom:18px;
-      color:var(--muted);
+      text-align:center;
+      width:100%;
+      font-size:14px;
+      color:#cdd0d4;
+      margin:0 0 18px;
     }
-
+    
     .rowy { display:flex; gap:10px; flex-wrap:wrap; margin-top:18px; }
 
     .pill {
@@ -673,14 +677,14 @@ function gateNotLoggedIn() {
   showGate((wrap) => {
     const box = document.createElement('div');
     box.style.cssText = `
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      width: 100%;
-      padding: 20px 0 10px;
-      gap: 20px;
-      text-align: center;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      width:100%;
+      padding:8px 0 0;
+      gap:16px;
+      text-align:center;
     `;
 
     const btn = document.createElement('button');
