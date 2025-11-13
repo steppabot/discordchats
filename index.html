@@ -459,6 +459,52 @@ function contentWithMentions(text) {
 
   return frag;
 }
+
+function contentWithMentionsAndHighlight(text, query) {
+  // First build the base fragment with mention pills
+  const base = contentWithMentions(text || "");
+  if (!query) return base;
+
+  const q = query.toLowerCase();
+  const outFrag = document.createDocumentFragment();
+
+  function walk(node, parent) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const src = node.textContent || "";
+      let i = 0;
+      while (i < src.length) {
+        const idx = src.toLowerCase().indexOf(q, i);
+        if (idx === -1) {
+          if (i < src.length) parent.append(document.createTextNode(src.slice(i)));
+          break;
+        }
+        if (idx > i) parent.append(document.createTextNode(src.slice(i, idx)));
+        const mark = document.createElement("span");
+        mark.className = "hl";
+        mark.textContent = src.slice(idx, idx + q.length);
+        parent.append(mark);
+        i = idx + q.length;
+      }
+      return;
+    }
+
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      // Keep mention pills as-is
+      if (node.classList.contains("mention-pill")) {
+        parent.append(node);
+        return;
+      }
+      const clone = node.cloneNode(false);
+      parent.append(clone);
+      node.childNodes.forEach(child => walk(child, clone));
+      return;
+    }
+  }
+
+  base.childNodes.forEach(child => walk(child, outFrag));
+  return outFrag;
+}
+
   
 /* banners */
 function banner(msg, ok=true){
@@ -792,7 +838,7 @@ function showFromSuggestions(list){
   ul.style.display = 'block';
 }
 
-  
+
 function setContentWithHighlight(containerEl, text, query){
   containerEl.textContent = "";
   if (!query){ containerEl.textContent = text || ""; return; }
@@ -835,6 +881,7 @@ function messageRowWithHL(m, query){
   return row;
 }
 
+  
 async function doSearch(e) {
   if (e) {
     e.preventDefault();
