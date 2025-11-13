@@ -143,6 +143,70 @@
       outline:none;
     }
     #search-input::placeholder{ color:#9aa0a6 }
+    .search-input-wrap{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      background:#1f2024;
+      border:1px solid #16171a;
+      border-radius:8px;
+      padding:4px 6px;
+    }
+    .search-input-wrap input{
+      flex:1;
+      border:0;
+      outline:none;
+      background:transparent;
+      color:#e8eaed;
+      padding:6px 6px;
+    }
+    
+    /* from: pill (Discord-ish) */
+    .search-pill{
+      display:inline-flex;
+      align-items:center;
+      padding:2px 8px;
+      border-radius:6px;
+      background:#3e3f64;
+      color:#8f93b9;
+      font-size:12px;
+      font-weight:600;
+    }
+    
+    /* suggestion dropdown */
+    .from-suggest{
+      list-style:none;
+      margin:6px 0 0;
+      padding:0;
+      max-height:220px;
+      overflow:auto;
+      border-radius:8px;
+      background:#202226;
+      border:1px solid #16171a;
+      display:none;
+    }
+    .from-suggest li{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      cursor:pointer;
+    }
+    .from-suggest li:hover{
+      background:#262a30;
+    }
+    .from-suggest img{
+      width:22px;
+      height:22px;
+      border-radius:50%;
+    }
+    .from-suggest span.name{
+      font-weight:600;
+    }
+    .from-suggest span.meta{
+      font-size:11px;
+      color:#9aa0a6;
+    }
     .hl{ background:#5f5345; color:#fff; border-radius:4px; padding:0 2px; }
 
     /* Header user chip */
@@ -260,15 +324,19 @@
             <div id="cal-grid" class="cal-grid"></div>
           </div>
         </div>
-
+        
         <div class="search">
           <div class="search-title">Search <span class="glass">🔍</span></div>
           <form id="search-form" action="javascript:;" novalidate autocomplete="off">
-            <input id="search-input" type="text" placeholder="Find messages…" />
+            <div class="search-input-wrap">
+              <span id="from-pill" class="search-pill" style="display:none;"></span>
+              <span id="mentions-pill" class="search-pill" style="display:none;"></span>
+              <input id="search-input" type="text" placeholder="Find Messages…" />
+            </div>
           </form>
+          <ul id="from-suggest" class="from-suggest"></ul>
           <div id="search-hint" class="muted" style="margin-top:6px; font-size:12px;"></div>
         </div>
-      </div>
     </aside>
 
     <main class="center">
@@ -320,7 +388,10 @@
 const API_BASE = "https://api.discordchats.com/api";
 const $ = (s) => document.querySelector(s);
 const mentionCache = new Map();  // id -> name
-
+let fromFilterUser = null;        // { id, name }
+let mentionsFilterUser = null;    // { id, name }
+let fromSuggestTimer = null;
+let currentSuggestKind = null;    // "from" | "mentions" | null
 
 async function resolveMentionIds(ids) {
   if (!ids || !ids.length) return;
@@ -629,11 +700,86 @@ async function loadMessages(dateStr) {
 /* ---------- Search (newest → oldest handled server-side) ---------- */
 let currentSearch = "";
 async function fetchSearch(q, limit=1000, offset=0){
-  const url = `${API_BASE}/search?` + new URLSearchParams({ q, limit, offset });
+  const params = new URLSearchParams({ q, limit, offset });
+  if (fromFilterUser && fromFilterUser.id) {
+    params.append('user_id', String(fromFilterUser.id));
+  }
+  if (mentionsFilterUser && mentionsFilterUser.id) {
+    params.append('mentioned_id', String(mentionsFilterUser.id));
+  }
+  const url = `${API_BASE}/search?` + params.toString();
   const res = await fetch(url, { credentials:'include' });
   if (!res.ok) throw new Error(`/search ${res.status}`);
   return res.json();
 }
+  
+function updateFilterPills(){
+  const fromPill = document.getElementById('from-pill');
+  const mentionPill = document.getElementById('mentions-pill');
+
+  if (fromFilterUser){
+    fromPill.style.display = 'inline-flex';
+    fromPill.textContent = `from: ${fromFilterUser.name}`;
+  } else {
+    fromPill.style.display = 'none';
+  }
+
+  if (mentionsFilterUser){
+    mentionPill.style.display = 'inline-flex';
+    mentionPill.textContent = `mentions: ${mentionsFilterUser.name}`;
+  } else {
+    mentionPill.style.display = 'none';
+  }
+}
+  
+async function fetchUserSuggestions(term){
+  const res = await apiFetch(`/users?` + new URLSearchParams({ term, limit: 20 }));
+  return res; // array of {user_id, display_name, avatar_url, messages}
+}
+
+function showFromSuggestions(list){
+  const ul = document.getElementById('from-suggest');
+  ul.innerHTML = '';
+  if (!list || !list.length){
+    ul.style.display = 'none';
+    return;
+  }
+  for (const u of list){
+    const li = document.createElement('li');
+    const img = document.createElement('img');
+    img.src = u.avatar_url || 'https://cdn.discordapp.com/embed/avatars/0.png';
+
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = u.display_name || `User ${u.user_id}`;
+
+    const meta = document.createElement('span');
+    meta.className = 'meta';
+    meta.textContent = `${u.messages.toLocaleString()} msgs`;
+
+    li.append(img, name, meta);
+
+    li.onclick = () => {
+      if (currentSuggestKind === 'from') {
+        fromFilterUser = { id: u.user_id, name: name.textContent };
+      } else if (currentSuggestKind === 'mentions') {
+        mentionsFilterUser = { id: u.user_id, name: name.textContent };
+      }
+      updateFilterPills();
+
+      document.getElementById('from-suggest').style.display = 'none';
+      const inp = document.getElementById('search-input');
+      inp.value = '';  // clear out the `from:` / `mentions:` text
+      inp.focus();
+      currentSuggestKind = null;
+    };
+
+    ul.append(li);
+  }
+  ul.style.display = 'block';
+}
+
+  
 function setContentWithHighlight(containerEl, text, query){
   containerEl.textContent = "";
   if (!query){ containerEl.textContent = text || ""; return; }
@@ -676,25 +822,48 @@ function messageRowWithHL(m, query){
   return row;
 }
 
-async function doSearch(e){
-  if (e) { e.preventDefault(); e.stopPropagation(); }
+async function doSearch(e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
   const input = document.getElementById('search-input');
   const q = (input.value || '').trim();
-  if (!q) return;
+
+  // If there is no text AND no filters, don't do anything
+  if (!q && !fromFilterUser && !mentionsFilterUser) return;
 
   currentSearch = q;
-  document.getElementById('channel-title').textContent = `# search — "${q}"`;
+
+  // Build nice title bits like: # search — from: Gizmo · mentions: g2eg · "clip"
+  const titleBits = [];
+  if (fromFilterUser)     titleBits.push(`from: ${fromFilterUser.name}`);
+  if (mentionsFilterUser) titleBits.push(`mentions: ${mentionsFilterUser.name}`);
+  if (q)                  titleBits.push(`"${q}"`);
+
+  document.getElementById('channel-title').textContent =
+    '# search — ' + (titleBits.length ? titleBits.join(' · ') : 'results');
+
   document.getElementById('count').textContent = '';
   document.getElementById('search-hint').textContent = 'Searching…';
 
   try {
+    // fetchSearch now already knows how to append user_id / mentioned_id
     const { ok, rows } = await fetchSearch(q, 2000, 0);
+
     const wrap = document.getElementById('messages');
     wrap.innerHTML = '';
-    for (const m of rows) wrap.append(messageRowWithHL(m, q));
+
+    for (const m of rows) {
+      wrap.append(messageRowWithHL(m, q));
+    }
+
     document.getElementById('count').textContent =
       rows.length ? `(${rows.length.toLocaleString()} results)` : '(0 results)';
-    document.getElementById('search-hint').textContent = rows.length ? '' : 'No matches.';
+    document.getElementById('search-hint').textContent =
+      rows.length ? '' : 'No matches.';
+
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   } catch (err) {
     console.error(err);
@@ -702,6 +871,8 @@ async function doSearch(e){
     document.getElementById('search-hint').textContent = 'Search failed.';
   }
 }
+
+
 
 /* -------- Gate/UI logic -------- */
 const gateEl = $('#gate');
@@ -924,6 +1095,40 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (input) {
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doSearch(e);
+    });
+
+    input.addEventListener('input', (e) => {
+      const v = (e.target.value || '').trimStart();
+      const mFrom = v.match(/^from:\s*(.+)?$/i);
+      const mMentions = v.match(/^mentions:\s*(.+)?$/i);
+
+      let term = null;
+      if (mFrom) {
+        currentSuggestKind = 'from';
+        term = (mFrom[1] || '').trim();
+      } else if (mMentions) {
+        currentSuggestKind = 'mentions';
+        term = (mMentions[1] || '').trim();
+      } else {
+        currentSuggestKind = null;
+        document.getElementById('from-suggest').style.display = 'none';
+        return;
+      }
+
+      if (!term || term.length < 1) {
+        document.getElementById('from-suggest').style.display = 'none';
+        return;
+      }
+
+      clearTimeout(fromSuggestTimer);
+      fromSuggestTimer = setTimeout(async () => {
+        try {
+          const list = await fetchUserSuggestions(term);
+          showFromSuggestions(list);
+        } catch (err) {
+          console.error(err);
+        }
+      }, 200);
     });
   }
 
