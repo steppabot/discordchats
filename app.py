@@ -511,20 +511,57 @@ async def _fetch_member(duid: int) -> Optional[dict]:
         log.info("Member %s roles=%s premium_since=%s", duid, m.get("roles"), m.get("premium_since"))
         return m
 
-def _is_booster(member: dict | None) -> bool:
+# ---- Booster role resolver (cache) ----
+_booster_role_ids: set[int] | None = None
+
+async def _fetch_booster_role_ids() -> set[int]:
+    """Return role IDs that represent the Nitro Booster role(s) for the guild."""
+    global _booster_role_ids
+    if _booster_role_ids is not None:
+        return _booster_role_ids
+
+    if not BOT_TOKEN or not GUILD_ID:
+        return set()
+
+    url = f"{DISCORD_API}/guilds/{GUILD_ID}/roles"
+    headers = {"Authorization": f"Bot {BOT_TOKEN}"}
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        r = await client.get(url, headers=headers)
+        r.raise_for_status()
+        roles = r.json()  # list of role objects
+
+    ids: set[int] = set()
+    for role in roles:
+        tags = role.get("tags") or {}
+        # Discord marks the booster role with {"premium_subscriber": None}
+        if "premium_subscriber" in tags:
+            try:
+                ids.add(int(role["id"]))
+            except Exception:
+                pass
+
+    # allow env override / additions too
+    ids |= BOOSTER_ROLE_IDS
+
+    _booster_role_ids = ids
+    log.info("Booster role IDs resolved: %s", sorted(ids))
+    return ids
+
+async def _is_booster_async(member: dict | None) -> bool:
     if not member:
         return False
 
-    # If Discord says they're boosting, trust it
+    # If present, trust it (may be absent on Bot-token fetches)
     if member.get("premium_since"):
         return True
 
-    # Fallback to role id(s) in env
     try:
-        roles = {int(r) for r in member.get("roles", [])}
+        member_roles = {int(r) for r in member.get("roles", [])}
     except Exception:
-        roles = set()
-    return any(r in roles for r in BOOSTER_ROLE_IDS)
+        member_roles = set()
+
+    booster_ids = await _fetch_booster_role_ids()
+    return bool(member_roles & booster_ids)
 
 async def _sub_status(duid: int) -> Optional[dict]:
     row = await _db_fetchrow("""
@@ -600,7 +637,7 @@ async def gate_status(request: Request):
         return {"authenticated": False, "allowed": False, "reason": "not_logged_in"}
 
     member = await _fetch_member(duid)
-    if _is_booster(member):
+    if await _is_booster_async(member):
         return {"authenticated": True, "allowed": True, "reason": "booster"}
 
     st = await _sub_status(duid)
@@ -621,7 +658,7 @@ async def me(request: Request):
         "discord_user_id": duid,
         "display_name": (user["global_name"] or user["username"]) if user else None,
         "avatar_url": user["avatar_url"] if user else None,
-        "is_booster": _is_booster(member),
+        "is_booster": await _is_booster_async(member),
         "subscription": st or None
     }
 
