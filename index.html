@@ -131,8 +131,11 @@
       width:min(560px, 95vw); background:#26282d; border:1px solid #1b1c20; border-radius:14px; padding:18px;
       box-shadow:0 10px 30px rgba(0,0,0,.45);
     }
-    .gate-title { font-weight:800; letter-spacing:.3px; font-size:18px; margin-bottom:6px; }
-    .gate-sub { color:#cdd0d4; margin-bottom:12px; }
+    .gate-title,
+    .gate-sub {
+      text-align: center;
+      width: 100%;
+    }
     .rowy { display:flex; gap:10px; flex-wrap:wrap; }
     .pill { flex:1; min-width:220px; padding:14px; background:#202226; border:1px solid #17191d; border-radius:12px; }
     .pill h4 { margin:0 0 6px; }
@@ -619,28 +622,23 @@ async function doLogout(){
 function gateNotLoggedIn() {
   gateTitle.textContent = 'Welcome to DiscordChats';
   gateSub.textContent = 'Please sign in with Discord to continue.';
-  
+
   showGate((wrap) => {
     const box = document.createElement('div');
     box.style.cssText = `
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 18px;
+      justify-content: center;
       width: 100%;
-      padding: 10px 0;
+      padding: 20px 0 10px;
+      gap: 20px;
+      text-align: center;
     `;
 
-    const title = document.createElement('h4');
-    title.textContent = "Sign in";
-    title.style.margin = "0";
+    // Remove the "Sign in" label and extra description — not needed
+    // Only the button stays.
 
-    const desc = document.createElement('p');
-    desc.textContent = "Use your Discord account to check access.";
-    desc.style.margin = "0";
-    desc.style.color = "#cdd0d4";
-
-    // ✅ REAL BUTTON (same as header)
     const btn = document.createElement('button');
     btn.className = "discord-login-btn";
     btn.onclick = startLogin;
@@ -652,10 +650,11 @@ function gateNotLoggedIn() {
       <span>Sign in via Discord</span>
     `;
 
-    box.append(title, desc, btn);
+    box.append(btn);
     wrap.append(box);
   });
 }
+
 
   
 function gatePaywall(){
