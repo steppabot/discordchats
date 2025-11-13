@@ -348,77 +348,78 @@ async def messages(
 # ------------------------------
 @app.get("/api/search")
 async def search_messages(
-    q: str = Query(..., min_length=2, max_length=100, description="Search term"),
+    q: str = Query("", max_length=100, description="Search term (can be empty if user_id/mentioned_id set)"),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0, le=100000),
+    user_id: Optional[int] = Query(None, description="Filter by User"),
+    mentioned_id: Optional[int] = Query(None, description="Filter by Mentions"),
 ):
-    term = q.strip()
-    if not term:
-        raise HTTPException(status_code=400, detail="Empty search query")
+    term = (q or "").strip()
+
+    if not term and user_id is None and mentioned_id is None:
+        raise HTTPException(status_code=400, detail="Need q, user_id, or mentioned_id")
 
     try:
         async with _pool.acquire() as conn:
-            try:
-                rows = await conn.fetch(
-                    """
-                    SELECT
-                        m.message_id,
-                        m.display_name,
-                        m.avatar_url,
-                        m.role_color_1,
-                        m.role_color_2,
-                        m.ts_local_time,
-                        m.ts_local_date,
-                        m.ts_utc,
-                        m.channel_id,
-                        m.content,
-                        COALESCE(
-                          json_agg(
-                            json_build_object(
-                              's3_url',   a.s3_url,
-                              's3_key',   a.s3_key,
-                              'url',      a.url,
-                              'filename', a.filename,
-                              'type',     a.content_type,
-                              'size',     a.size_bytes
-                            )
-                          ) FILTER (WHERE a.attachment_id IS NOT NULL),
-                          '[]'::json
-                        ) AS attachments
-                    FROM archived_messages m
-                    LEFT JOIN archived_attachments a
-                      ON a.message_id = m.message_id
-                    WHERE m.content ILIKE '%' || $1 || '%'
-                    GROUP BY m.message_id
-                    ORDER BY m.ts_utc DESC, m.channel_id DESC, m.message_id DESC
-                    LIMIT $2 OFFSET $3
-                    """,
-                    term, limit, offset
+            params = []
+            where_clauses = []
+
+            if term:
+                where_clauses.append("m.content ILIKE '%' || $%d || '%%'" % (len(params)+1))
+                params.append(term)
+
+            if user_id is not None:
+                where_clauses.append("m.user_id = $%d" % (len(params)+1))
+                params.append(user_id)
+
+            if mentioned_id is not None:
+                # match <@ID> and <@!ID> forms
+                p1 = len(params) + 1
+                p2 = len(params) + 2
+                where_clauses.append(
+                    f"(m.content ILIKE '%' || ${p1} || '%%' "
+                    f"OR m.content ILIKE '%' || ${p2} || '%%')"
                 )
-            except Exception as join_err:
-                log.warning("Attachments join skipped in /api/search: %s", join_err)
-                rows = await conn.fetch(
-                    """
-                    SELECT
-                        m.message_id,
-                        m.display_name,
-                        m.avatar_url,
-                        m.role_color_1,
-                        m.role_color_2,
-                        m.ts_local_time,
-                        m.ts_local_date,
-                        m.ts_utc,
-                        m.channel_id,
-                        m.content
-                    FROM archived_messages m
-                    WHERE m.content ILIKE '%' || $1 || '%'
-                    ORDER BY m.ts_utc DESC, m.channel_id DESC, m.message_id DESC
-                    LIMIT $2 OFFSET $3
-                    """,
-                    term, limit, offset
-                )
-                # normalize to same shape as the joined query
-                rows = [dict(r) | {"attachments": []} for r in rows]
+                params.append(f"<@{mentioned_id}>")
+                params.append(f"<@!{mentioned_id}>")
+
+            where_sql = " AND ".join(where_clauses) or "TRUE"
+
+            sql = f"""
+                SELECT
+                    m.message_id,
+                    m.display_name,
+                    m.avatar_url,
+                    m.role_color_1,
+                    m.role_color_2,
+                    m.ts_local_time,
+                    m.ts_local_date,
+                    m.ts_utc,
+                    m.channel_id,
+                    m.content,
+                    COALESCE(
+                      json_agg(
+                        json_build_object(
+                          's3_url',   a.s3_url,
+                          'url',      a.url,
+                          'filename', a.filename,
+                          'type',     a.content_type,
+                          'size',     a.size_bytes
+                        )
+                      ) FILTER (WHERE a.attachment_id IS NOT NULL),
+                      '[]'::json
+                    ) AS attachments
+                FROM archived_messages m
+                LEFT JOIN archived_attachments a
+                  ON a.message_id = m.message_id
+                WHERE {where_sql}
+                GROUP BY m.message_id
+                ORDER BY m.ts_utc DESC, m.channel_id DESC, m.message_id DESC
+                LIMIT ${len(params)+1} OFFSET ${len(params)+2}
+            """
+
+            params.extend([limit, offset])
+            rows = await conn.fetch(sql, *params)
 
         out = []
         for rec in rows:
@@ -440,6 +441,47 @@ async def search_messages(
 
     except Exception as e:
         log.exception("/api/search failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/users")
+async def user_search(
+    term: str = Query(..., min_length=1, max_length=50),
+    limit: int = Query(20, ge=1, le=50),
+):
+    """
+    Fuzzy search for users by display_name (and optionally ID).
+    Used for the `from:` autocomplete.
+    """
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    user_id,
+                    MAX(display_name) AS display_name,
+                    MAX(avatar_url)   AS avatar_url,
+                    COUNT(*)          AS messages
+                FROM archived_messages
+                WHERE display_name ILIKE '%' || $1 || '%'
+                   OR CAST(user_id AS TEXT) ILIKE '%' || $1 || '%'
+                GROUP BY user_id
+                ORDER BY messages DESC
+                LIMIT $2
+                """,
+                term, limit
+            )
+        return [
+            {
+                "user_id": str(r["user_id"]),
+                "display_name": r["display_name"],
+                "avatar_url": r["avatar_url"],
+                "messages": r["messages"],
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        log.exception("/api/users failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================
