@@ -566,7 +566,8 @@ async def callback(code: str, request: Request):
 
     await _upsert_web_user(u)
     resp = Response(status_code=302)
-    resp.headers["Location"] = "/"
+    # send them back to your site (optionally add a flag like ?logged=1)
+    resp.headers["Location"] = f"{SITE_BASE_URL}/?logged=1"
     _set_session(resp, int(u["id"]))
     return resp
 
