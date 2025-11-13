@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRouter
 from datetime import date as Date
 from urllib.parse import urlparse
+from starlette.responses import RedirectResponse
 
 # ----------------------------
 # Config / Env
@@ -565,9 +566,7 @@ async def callback(code: str, request: Request):
         u = me.json()
 
     await _upsert_web_user(u)
-    resp = Response(status_code=302)
-    # send them back to your site (optionally add a flag like ?logged=1)
-    resp.headers["Location"] = f"{SITE_BASE_URL}/?logged=1"
+    resp = RedirectResponse(url=f"{SITE_BASE_URL}/?logged=1", status_code=302)
     _set_session(resp, int(u["id"]))
     return resp
 
