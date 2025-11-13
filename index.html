@@ -33,31 +33,27 @@
     .att { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; max-width:100%; }
     .att img, .att video { display:block; height:auto; max-width:420px; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
 
-    /* OVERRIDE all .btn conflict */
-    #login-btn.btn {
-      all: unset !important;
-    }
-    
-    /* New Discord-specific button */
     .discord-login-btn {
-      display: inline-flex;
+      display: flex;
       align-items: center;
       justify-content: center;
-      gap: 10px;
+      gap: 12px;
     
-      background: #5865F2; /* Discord blurple */
-      color: white;
+      width: 280px;
+      height: 56px;
+    
+      background: #5865F2;
+      color: #fff;
+      font-size: 17px;
+      font-weight: 700;
     
       border: none;
-      border-radius: 12px;
-      padding: 14px 28px;
-    
-      font-size: 16px;
-      font-weight: 700;
+      border-radius: 14px;
       cursor: pointer;
     
-      box-shadow: 0 4px 20px rgba(0,0,0,0.35);
-      transition: background 0.15s ease, transform 0.15s ease;
+      box-shadow: 0 4px 22px rgba(0,0,0,0.35);
+    
+      transition: background 0.15s, transform 0.15s;
     }
     
     .discord-login-btn:hover {
@@ -65,15 +61,10 @@
       transform: translateY(-1px);
     }
     
-    .discord-login-btn:active {
-      transform: translateY(0);
-    }
-    
-    .discord-logo {
-      width: 26px;
-      height: 26px;
-      color: white;
-      flex-shrink: 0;
+    .discord-login-btn svg {
+      width: 28px;
+      height: 28px;
+      fill: #fff;
     }
 
     /* Non-image/video file presentation */
@@ -621,20 +612,38 @@ function gateNotLoggedIn(){
   gateTitle.textContent = 'Welcome to DiscordChats';
   gateSub.textContent = 'Please sign in with Discord to continue.';
   showGate((wrap)=>{
-    const c = document.createElement('div'); c.className='rowy';
-    const p = document.createElement('div'); p.className='pill';
-    p.innerHTML = `<h4>Sign in</h4><p>Use your Discord account to check access.</p>`;
-    const b = document.createElement('button');
-    b.className = 'discord-login-btn';
-    b.innerHTML = `
-      <svg viewBox="0 0 245 240" aria-hidden="true">
-        <path fill="currentColor" d="M104.4 104.9c-5.7 0-10.2 5-10.2 11.1s4.6 11.1 10.2 11.1c5.7 0 10.2-5 10.2-11.1.1-6.1-4.5-11.1-10.2-11.1zm36.2 0c-5.7 0-10.2 5-10.2 11.1s4.6 11.1 10.2 11.1c5.7 0 10.2-5 10.2-11.1s-4.5-11.1-10.2-11.1z"/>
-        <path fill="currentColor" d="M189.5 20h-134C42.2 20 30 32.2 30 47.5v134C30 196.8 42.2 209 57.5 209h114l-5.4-18.8 12.9 12.1 12.2 11.4 21.8 19V47.5C213 32.2 200.8 20 185.5 20h4zM160 164s-4.3-5.1-7.9-9.6c15.7-4.4 21.6-14.1 21.6-14.1-4.9 3.2-9.6 5.4-13.8 6.9-6 2.5-11.8 4.1-17.5 5-11.6 2.1-22.3 1.5-31.5-.1-6.9-1.3-12.8-3.1-17.7-5-2.8-1.1-5.8-2.4-8.8-4.1-.4-.2-.8-.4-1.2-.7-.3-.2-.5-.3-.7-.4-.3-.2-.4-.3-.4-.3s5.7 9.5 20.8 14c-3.6 4.5-8 9.9-8 9.9-26.4-.8-36.4-18.1-36.4-18.1 0-38.3 17.3-69.4 17.3-69.4 17.3-12.9 33.8-12.5 33.8-12.5l1.2 1.4c-21.7 6.2-31.6 15.6-31.6 15.6s2.6-1.4 7-3.3c12.7-5.6 22.8-7.1 27-7.5.7-.1 1.3-.2 2-.2 7.2-.9 15.3-1.2 23.7-.2 11.2 1.3 23.3 4.6 35.6 11.3 0 0-9.5-9.1-30-15.3l1.7-1.9s16.5-.4 33.8 12.5c0 0 17.3 31.1 17.3 69.4 0 0-10.1 17.3-36.5 18.1z"/>
-      </svg>
-      <span>Sign in via Discord</span>
+    const box = document.createElement('div');
+    box.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+      width: 100%;
+      padding: 10px 0;
     `;
-    b.onclick = startLogin;
-    p.append(b); c.append(p); wrap.append(c);
+  
+    const title = document.createElement('h4');
+    title.textContent = "Sign in";
+    title.style.margin = "0";
+  
+    const desc = document.createElement('p');
+    desc.textContent = "Use your Discord account to check access.";
+    desc.style.margin = "0";
+    desc.style.color = "#cdd0d4";
+  
+    const btn = document.createElement('button');
+    btn.className = "discord-login-btn";
+    btn.innerHTML = `
+        <svg viewBox="0 0 245 240">
+          <path d="M104.4 104.9c-5.7 0-10.2 5-10.2 11.1s4.6 11.1 10.2 11.1c5.7 0 10.2-5 10.2-11.1.1-6.1-4.5-11.1-10.2-11.1zm36.2 0c-5.7 0-10.2 5-10.2 11.1s4.6 11.1 10.2 11.1c5.7 0 10.2-5 10.2-11.1s-4.5-11.1-10.2-11.1z"/>
+          <path d="M189.5 20h-134C42.2 20 30 32.2 30 47.5v134C30 196.8 42.2 209 57.5 209h114l-5.4-18.8 12.9 12.1 12.2 11.4 21.8 19V47.5C213 32.2 200.8 20 185.5 20h4zM160 164s-4.3-5.1-7.9-9.6c15.7-4.4 21.6-14.1 21.6-14.1-4.9 3.2-9.6 5.4-13.8 6.9-6 2.5-11.8 4.1-17.5 5-11.6 2.1-22.3 1.5-31.5-.1-6.9-1.3-12.8-3.1-17.7-5-2.8-1.1-5.8-2.4-8.8-4.1-.4-.2-.8-.4-1.2-.7-.3-.2-.5-.3-.7-.4-.3-.2-.4-.3-.4-.3s5.7 9.5 20.8 14c-3.6 4.5-8 9.9-8 9.9-26.4-.8-36.4-18.1-36.4-18.1 0-38.3 17.3-69.4 17.3-69.4 17.3-12.9 33.8-12.5 33.8-12.5l1.2 1.4c-21.7 6.2-31.6 15.6-31.6 15.6s2.6-1.4 7-3.3c12.7-5.6 22.8-7.1 27-7.5.7-.1 1.3-.2 2-.2 7.2-.9 15.3-1.2 23.7-.2 11.2 1.3 23.3 4.6 35.6 11.3 0 0-9.5-9.1-30-15.3l1.7-1.9s16.5-.4 33.8 12.5c0 0 17.3 31.1 17.3 69.4 0 0-10.1 17.3-36.5 18.1z"/>
+        </svg>
+        <span>Sign in via Discord</span>
+    `;
+    btn.onclick = startLogin;
+  
+    box.append(title, desc, btn);
+    wrap.append(box);
   });
 }
 function gatePaywall(){
