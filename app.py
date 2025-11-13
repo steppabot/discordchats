@@ -364,21 +364,25 @@ async def search_messages(
             params = []
             where_clauses = []
 
+            # text search
             if term:
-                where_clauses.append("m.content ILIKE '%' || $%d || '%%'" % (len(params)+1))
+                idx = len(params) + 1
+                where_clauses.append(f"m.content ILIKE '%' || ${idx} || '%'")
                 params.append(term)
 
+            # from: user filter
             if user_id is not None:
-                where_clauses.append("m.user_id = $%d" % (len(params)+1))
+                idx = len(params) + 1
+                where_clauses.append(f"m.user_id = ${idx}")
                 params.append(user_id)
 
+            # mentions: user filter
             if mentioned_id is not None:
-                # match <@ID> and <@!ID> forms
                 p1 = len(params) + 1
                 p2 = len(params) + 2
                 where_clauses.append(
-                    f"(m.content ILIKE '%' || ${p1} || '%%' "
-                    f"OR m.content ILIKE '%' || ${p2} || '%%')"
+                    f"(m.content ILIKE '%' || ${p1} || '%' "
+                    f"OR m.content ILIKE '%' || ${p2} || '%')"
                 )
                 params.append(f"<@{mentioned_id}>")
                 params.append(f"<@!{mentioned_id}>")
@@ -420,7 +424,6 @@ async def search_messages(
 
             params.extend([limit, offset])
             rows = await conn.fetch(sql, *params)
-
         out = []
         for rec in rows:
             r = dict(rec)
