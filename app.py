@@ -104,42 +104,44 @@ def _maybe_presign_url(raw_url: Optional[str]) -> Optional[str]:
 
 def _normalize_atts(atts: Any) -> List[Dict[str, Any]]:
     """
-    Normalize attachments into: [{url, s3_url, filename, type, size}]
-    - Prefer Stackhero S3 (s3_url or s3_key) and presign it
-    - Fall back to original Discord URL if no S3 info
+    Prefer Stackhero S3 presigned URLs using s3_key (or s3_url if present).
+    Fallback to Discord CDN URL only when needed.
     """
     if not atts:
         return []
 
-    # DB may return JSON string
     if isinstance(atts, str):
         try:
             atts = json.loads(atts)
         except Exception:
-            # Single URL string
             u = _maybe_presign_url(atts)
-            return [{"url": u, "s3_url": u}]
+            return [{"url": u}]
 
-    out: List[Dict[str, Any]] = []
-    if isinstance(atts, list):
-        for a in atts:
-            if isinstance(a, str):
-                u = _maybe_presign_url(a)
-                out.append({"url": u, "s3_url": u})
-                continue
+    out = []
+    for a in atts:
+        if isinstance(a, str):
+            u = _maybe_presign_url(a)
+            out.append({"url": u})
+            continue
 
-            if isinstance(a, dict):
-                # Prefer Stackhero key/url over Discord URL
-                raw = a.get("s3_url") or a.get("s3_key") or a.get("url")
-                u = _maybe_presign_url(raw)
+        if isinstance(a, dict):
+            # stackhero priority:
+            raw = (
+                a.get("s3_url") or
+                a.get("s3_key") or
+                a.get("url") or   # fallback discord
+                None
+            )
 
-                out.append({
-                    "url": u,                       # <- this is what the browser should load
-                    "s3_url": u,                    # keep for debugging/consistency
-                    "filename": a.get("filename"),
-                    "type": a.get("type") or a.get("content_type"),
-                    "size": a.get("size") or a.get("size_bytes"),
-                })
+            url = _maybe_presign_url(raw)
+
+            out.append({
+                "url": url,
+                "filename": a.get("filename"),
+                "type": a.get("content_type"),
+                "size": a.get("size_bytes"),
+            })
+
     return out
 
 # ----------------------------
