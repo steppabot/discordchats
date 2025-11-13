@@ -104,36 +104,38 @@ def _maybe_presign_url(raw_url: Optional[str]) -> Optional[str]:
 
 def _normalize_atts(atts: Any) -> List[Dict[str, Any]]:
     """
-    Normalize attachments into: [{url, filename, type, size}]
-    Accepts:
-      - list of dicts       (our normal join)
-      - list of strings     (raw URLs)
-      - JSON string         (either of the above)
-      - None / empty
-    Also presigns Stackhero/S3 links/keys.
+    Normalize attachments into: [{url, s3_url, filename, type, size}]
+    - Prefer Stackhero S3 (s3_url or s3_key) and presign it
+    - Fall back to original Discord URL if no S3 info
     """
     if not atts:
         return []
 
-    # If DB returned a JSON string
+    # DB may return JSON string
     if isinstance(atts, str):
         try:
             atts = json.loads(atts)
         except Exception:
-            # Treat as a single URL string
-            return [{"url": _maybe_presign_url(atts)}]
+            # Single URL string
+            u = _maybe_presign_url(atts)
+            return [{"url": u, "s3_url": u}]
 
     out: List[Dict[str, Any]] = []
     if isinstance(atts, list):
         for a in atts:
             if isinstance(a, str):
-                out.append({"url": _maybe_presign_url(a)})
+                u = _maybe_presign_url(a)
+                out.append({"url": u, "s3_url": u})
                 continue
+
             if isinstance(a, dict):
-                raw = a.get("s3_url") or a.get("url") or a.get("s3_key")
-                url = _maybe_presign_url(raw)
+                # Prefer Stackhero key/url over Discord URL
+                raw = a.get("s3_url") or a.get("s3_key") or a.get("url")
+                u = _maybe_presign_url(raw)
+
                 out.append({
-                    "url": url,
+                    "url": u,                       # <- this is what the browser should load
+                    "s3_url": u,                    # keep for debugging/consistency
                     "filename": a.get("filename"),
                     "type": a.get("type") or a.get("content_type"),
                     "size": a.get("size") or a.get("size_bytes"),
