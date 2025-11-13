@@ -405,6 +405,7 @@ async def search_messages(
                       json_agg(
                         json_build_object(
                           's3_url',   a.s3_url,
+                          's3_key',   a.s3_key,      -- 🔹 add this
                           'url',      a.url,
                           'filename', a.filename,
                           'type',     a.content_type,
@@ -421,7 +422,6 @@ async def search_messages(
                 ORDER BY m.ts_utc DESC, m.channel_id DESC, m.message_id DESC
                 LIMIT ${len(params)+1} OFFSET ${len(params)+2}
             """
-
             params.extend([limit, offset])
             rows = await conn.fetch(sql, *params)
         out = []
