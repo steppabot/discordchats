@@ -33,39 +33,66 @@
     .att { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; max-width:100%; }
     .att img, .att video { display:block; height:auto; max-width:420px; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
 
+    /* Primary Discord-style button (login + Open Discord) */
     .discord-login-btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 10px;
-    
+
       background: #5865F2;
       color: #fff;
-    
+
       padding: 14px 22px;
       font-size: 16px;
       font-weight: 700;
-    
+
       border: 0;
       border-radius: 12px;
       cursor: pointer;
-    
+
       text-decoration: none;
-    
+
       box-shadow: 0 4px 22px rgba(0,0,0,0.35);
-    
+
       transition: opacity .2s, transform .15s, background .15s;
+      width:100%;
+      max-width:260px;
     }
-    
+
     .discord-login-btn:hover {
       background: #4752C4;
       transform: translateY(-1px);
     }
-    
+
     .discord-logo-img {
       width: 22px;
       height: 22px;
       filter: invert(1); /* make logo white */
+    }
+
+    /* Gold subscribe button */
+    .sub-btn {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:14px 22px;
+      font-size:16px;
+      font-weight:700;
+      border:0;
+      border-radius:12px;
+      cursor:pointer;
+      text-decoration:none;
+      box-shadow:0 4px 22px rgba(0,0,0,0.35);
+      transition: opacity .2s, transform .15s, background .15s;
+      background:#f5c542;
+      color:#1b1405;
+      width:100%;
+      max-width:260px;
+    }
+    .sub-btn:hover {
+      background:#e0ae35;
+      transform:translateY(-1px);
     }
 
     /* Non-image/video file presentation */
@@ -121,7 +148,6 @@
       align-items:center;
       justify-content:center;
       background:rgba(0,0,0,.55);
-      /* Blur the content behind the overlay */
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
       z-index:9999;
@@ -136,11 +162,36 @@
       text-align: center;
       width: 100%;
     }
-    .rowy { display:flex; gap:10px; flex-wrap:wrap; }
-    .pill { flex:1; min-width:220px; padding:14px; background:#202226; border:1px solid #17191d; border-radius:12px; }
-    .pill h4 { margin:0 0 6px; }
-    .pill p { margin:0 0 12px; color:#b9bec6 }
-    .pill .btn { width:100% }
+    /* extra breathing room between subtitle and options */
+    .gate-sub {
+      margin-top:4px;
+      margin-bottom:18px;
+      color:var(--muted);
+    }
+
+    .rowy { display:flex; gap:10px; flex-wrap:wrap; margin-top:18px; }
+
+    .pill {
+      flex:1;
+      min-width:220px;
+      padding:18px 14px 16px;
+      background:#202226;
+      border:1px solid #17191d;
+      border-radius:12px;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      text-align:center;
+      gap:10px;
+    }
+    .pill h4 { margin:0 0 4px; }
+    .pill p  { margin:0 0 6px; color:#b9bec6 }
+
+    .pill .discord-login-btn,
+    .pill .sub-btn {
+      width:100%;
+      max-width:260px;
+    }
 
     /* Profile panel */
     .profile { position:fixed; right:14px; top:62px; width:320px; background:#26282d; border:1px solid #1b1c20; border-radius:12px; padding:12px; display:none; z-index:999; }
@@ -270,14 +321,12 @@ async function apiFetch(path, opts={}){
   const url = `${API_BASE}${path}`;
   const res = await fetch(url, { credentials:'include', ...opts });
   if (!res.ok) throw new Error(`${url} → ${res.status}`);
-  // handle webhook endpoints that return plain text, etc.
   const ct = res.headers.get('content-type') || '';
   if (ct.includes('application/json')) return res.json();
   return res.text();
 }
 
 async function fetchJSON(path) {
-  // public data endpoints; credentials include is okay (won't hurt)
   return apiFetch(path);
 }
 
@@ -306,7 +355,6 @@ function makeFilePill(href, label) {
 function isImageLike(a) {
   const t = (a.type || a.content_type || "").toLowerCase();
   if (t.startsWith("image/")) return true;
-
   const url = a.s3_url || a.url || "";
   return /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(url.split("?")[0]);
 }
@@ -314,7 +362,6 @@ function isImageLike(a) {
 function isVideoLike(a) {
   const t = (a.type || a.content_type || "").toLowerCase();
   if (t.startsWith("video/")) return true;
-
   const url = a.s3_url || a.url || "";
   return /\.(mp4|webm|mov)$/i.test(url.split("?")[0]);
 }
@@ -322,7 +369,6 @@ function isVideoLike(a) {
 function buildAttachmentEl(a) {
   const src = a.s3_url || a.url;
   const name = a.filename || "file";
-
   if (!src) return null;
 
   if (isImageLike(a)) {
@@ -611,14 +657,15 @@ async function startCheckout(){
 async function doLogout(){
   try{
     await apiFetch('/auth/logout', { method:'POST' });
-    // wipe UI state
     $('#user-chip').style.display = 'none';
-    $('#login-btn').style.display = '';
+    const loginBtn = $('#login-btn');
+    if (loginBtn) loginBtn.style.display = '';
     hideProfile();
-    await paintGate(); // re-check
+    await bootGate(); // re-check with new flow
   }catch(e){ banner('Logout failed.', false); }
 }
 
+/* Not logged in gate */
 function gateNotLoggedIn() {
   gateTitle.textContent = 'Welcome to DiscordChats';
   gateSub.textContent = 'Please sign in with Discord to continue.';
@@ -636,13 +683,9 @@ function gateNotLoggedIn() {
       text-align: center;
     `;
 
-    // Remove the "Sign in" label and extra description — not needed
-    // Only the button stays.
-
     const btn = document.createElement('button');
     btn.className = "discord-login-btn";
     btn.onclick = startLogin;
-
     btn.innerHTML = `
       <img class="discord-logo-img"
         src="https://cdn.jsdelivr.net/gh/simple-icons/simple-icons/icons/discord.svg"
@@ -655,43 +698,67 @@ function gateNotLoggedIn() {
   });
 }
 
-
-  
+/* Paywall gate (authed but not allowed) */
 function gatePaywall(){
   gateTitle.textContent = 'Choose access';
   gateSub.textContent = 'Boosters are free. Otherwise subscribe for $5/month.';
+
   showGate((wrap)=>{
-    const row = document.createElement('div'); row.className='rowy';
-    const a = document.createElement('div'); a.className='pill';
+    const row = document.createElement('div'); 
+    row.className='rowy';
+
+    // Boost pill
+    const a = document.createElement('div'); 
+    a.className='pill';
     a.innerHTML = `<h4>Boost the Server</h4><p>Active Nitro boosters get free access.</p>`;
-    const aBtn = document.createElement('a'); aBtn.className='btn'; aBtn.textContent='Open Discord';
-    aBtn.href = 'https://discord.com/app'; aBtn.target='_blank'; a.append(aBtn);
 
-    const b = document.createElement('div'); b.className='pill';
-    b.innerHTML = `<h4>Subscribe</h4><p>Unlock the archive for $5/month.</p>`;
-    const bBtn = document.createElement('button'); bBtn.className='btn'; bBtn.textContent='Subscribe $5';
-    bBtn.onclick = startCheckout; b.append(bBtn);
+    const aBtn = document.createElement('a');
+    aBtn.className = 'discord-login-btn';
+    aBtn.href = 'https://discord.com/app';
+    aBtn.target = '_blank';
+    aBtn.rel = 'noreferrer noopener';
+    aBtn.innerHTML = `
+      <img class="discord-logo-img"
+        src="https://cdn.jsdelivr.net/gh/simple-icons/simple-icons/icons/discord.svg"
+        alt="Discord">
+      <span>Open Discord</span>
+    `;
+    a.append(aBtn);
 
-    row.append(a,b); wrap.append(row);
+    // Subscribe pill
+    const b = document.createElement('div'); 
+    b.className='pill';
+    b.innerHTML = `<h4>Subscribe</h4><p>Unlock the archive with a monthly sub.</p>`;
+
+    const bBtn = document.createElement('button'); 
+    bBtn.type = 'button';
+    bBtn.className = 'sub-btn';
+    bBtn.textContent = 'Subscribe';
+    bBtn.onclick = startCheckout;
+    b.append(bBtn);
+
+    row.append(a,b); 
+    wrap.append(row);
   });
 }
 
-async function paintGate(){
+async function paintGate(){  // legacy helper (not used by boot, but kept just in case)
   const status = await getGate();
   if (!status.authenticated){
-    $('#login-btn').style.display = '';
+    const loginBtn = $('#login-btn');
+    if (loginBtn) loginBtn.style.display = '';
     $('#user-chip').style.display = 'none';
     gateNotLoggedIn();
     return;
   }
-  // authenticated
-  $('#login-btn').style.display = 'none';
+  const loginBtn = $('#login-btn');
+  if (loginBtn) loginBtn.style.display = 'none';
+
   const me = await getMe();
   if (me){
     $('#user-chip').style.display = 'inline-flex';
     $('#user-name').textContent = me.display_name || ('User ' + me.discord_user_id);
     $('#user-avatar').src = me.avatar_url || 'https://cdn.discordapp.com/embed/avatars/0.png';
-    // profile kv
     const isBooster = !!me.is_booster;
     const sub = me.subscription;
     const statusText = isBooster ? 'Booster' : (sub?.status || '—');
@@ -699,7 +766,6 @@ async function paintGate(){
     $('#kv-status').textContent = statusText;
     $('#kv-sub').textContent = sub ? (sub.stripe_sub_id ? 'Stripe' : '—') : (isBooster ? 'Booster' : '—');
     $('#kv-end').textContent = periodEnd;
-    // cancel button visibility
     $('#cancel-sub').style.display = (sub && (sub.status === 'active' || sub.status === 'trialing')) ? 'inline-block' : 'none';
   }
   if (!status.allowed){
@@ -744,7 +810,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     try {
       await apiFetch('/pay/cancel', { method:'POST' });
       banner('Subscription canceled.', true);
-      // reload gate state after cancellation
       await bootGate();
     } catch (e) {
       banner('Cancel failed.', false);
@@ -773,7 +838,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // 🔥 New secure boot process
+  // New secure boot process
   await bootGate();
 });
 
@@ -784,12 +849,13 @@ async function bootGate() {
 
   const status = await getGate();
 
-  // 🔒 Not logged in
+  // Not logged in
   if (!status.authenticated) {
-    $('#login-btn').style.display = '';
+    const loginBtn = $('#login-btn');
+    if (loginBtn) loginBtn.style.display = '';
     $('#user-chip').style.display = 'none';
     gateNotLoggedIn();
-    return; // ⛔ STOP — do NOT load archive
+    return; // do NOT load archive
   }
 
   // Logged in → show chip
@@ -813,13 +879,13 @@ async function bootGate() {
         : 'none';
   }
 
-  // 🧱 Authenticated but NOT allowed
+  // Authenticated but NOT allowed
   if (!status.allowed) {
     gatePaywall();
-    return; // ⛔ STOP — do NOT load archive
+    return; // do NOT load archive
   }
 
-  // 🎉 Allowed → remove gate + load archive
+  // Allowed → remove gate + load archive
   hideGate();
   await loadDates();
 }
