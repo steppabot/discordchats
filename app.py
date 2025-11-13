@@ -613,13 +613,15 @@ def _session_user(request: Request) -> Optional[int]:
 async def resolve_mentions(ids: str, request: Request):
     """
     Resolve a comma-separated list of user IDs into display names.
-    Only available to logged-in users.
-    Returns: { "123": "VixesDog", "456": "Greg" }
+
+    Uses archived_messages + web_users only.
+    Returns: { "123": "VixesDog", "456": "MODA" }
     """
     duid = _session_user(request)
     if not duid:
         raise HTTPException(status_code=401, detail="Not logged in")
 
+    # Parse & dedupe IDs
     raw_ids = [s.strip() for s in ids.split(",") if s.strip().isdigit()]
     seen: set[int] = set()
     uids: list[int] = []
@@ -629,29 +631,47 @@ async def resolve_mentions(ids: str, request: Request):
             seen.add(uid)
             uids.append(uid)
 
-    # Safety cap
     if not uids:
         return {}
-    if len(uids) > 50:
-        uids = uids[:50]
+
+    # Safety cap
+    if len(uids) > 100:
+        uids = uids[:100]
+
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            WITH wanted AS (
+              SELECT unnest($1::bigint[]) AS uid
+            ),
+            latest AS (
+              SELECT
+                m.user_id,
+                m.display_name,
+                m.ts_utc,
+                ROW_NUMBER() OVER (
+                  PARTITION BY m.user_id
+                  ORDER BY m.ts_utc DESC
+                ) AS rn
+              FROM archived_messages m
+              JOIN wanted w ON w.uid = m.user_id
+            )
+            SELECT
+              l.user_id,
+              COALESCE(wu.global_name, wu.username, l.display_name) AS name
+            FROM latest l
+            LEFT JOIN web_users wu
+              ON wu.discord_user_id = l.user_id
+            WHERE l.rn = 1;
+            """,
+            uids,
+        )
 
     out: dict[str, str] = {}
-    for uid in uids:
-        try:
-            m = await _fetch_member(uid)
-        except Exception:
-            m = None
-        if not m:
-            continue
-
-        user = m.get("user") or {}
-        display = (
-            m.get("nick")
-            or user.get("global_name")
-            or user.get("username")
-            or f"User {uid}"
-        )
-        out[str(uid)] = display
+    for r in rows:
+        name = r["name"]
+        if name:
+            out[str(r["user_id"])] = name
 
     return out
 
@@ -844,3 +864,4 @@ app.include_router(auth_router)
 app.include_router(gate_router)
 app.include_router(pay_router)
 app.include_router(me_router)
+app.include_router(mentions_router)   # ← add this line
