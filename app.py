@@ -449,6 +449,7 @@ auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 gate_router = APIRouter(prefix="/api/gate", tags=["gate"])
 pay_router  = APIRouter(prefix="/api/pay", tags=["pay"])
 me_router   = APIRouter(prefix="/api/me", tags=["me"])
+mentions_router = APIRouter(prefix="/api/mentions", tags=["mentions"])
 
 # --- Simple signed cookie session (HMAC) ---
 def _sign(v: str) -> str:
@@ -607,6 +608,52 @@ def _session_user(request: Request) -> Optional[int]:
         duid = int(ver.split(":")[0]); return duid
     except Exception:
         return None
+
+@mentions_router.get("")
+async def resolve_mentions(ids: str, request: Request):
+    """
+    Resolve a comma-separated list of user IDs into display names.
+    Only available to logged-in users.
+    Returns: { "123": "VixesDog", "456": "Greg" }
+    """
+    duid = _session_user(request)
+    if not duid:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    raw_ids = [s.strip() for s in ids.split(",") if s.strip().isdigit()]
+    seen: set[int] = set()
+    uids: list[int] = []
+    for s in raw_ids:
+        uid = int(s)
+        if uid not in seen:
+            seen.add(uid)
+            uids.append(uid)
+
+    # Safety cap
+    if not uids:
+        return {}
+    if len(uids) > 50:
+        uids = uids[:50]
+
+    out: dict[str, str] = {}
+    for uid in uids:
+        try:
+            m = await _fetch_member(uid)
+        except Exception:
+            m = None
+        if not m:
+            continue
+
+        user = m.get("user") or {}
+        display = (
+            m.get("nick")
+            or user.get("global_name")
+            or user.get("username")
+            or f"User {uid}"
+        )
+        out[str(uid)] = display
+
+    return out
 
 # --------- OAuth ----------
 @auth_router.get("/login")
