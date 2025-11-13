@@ -547,6 +547,23 @@ async def _fetch_booster_role_ids() -> set[int]:
     log.info("Booster role IDs resolved: %s", sorted(ids))
     return ids
 
+
+async def _debug_booster_view(duid: int) -> dict:
+    member = await _fetch_member(duid)
+    try:
+        m_roles = {int(r) for r in (member or {}).get("roles", [])}
+    except Exception:
+        m_roles = set()
+    booster_ids = await _fetch_booster_role_ids()
+    return {
+        "duid": duid,
+        "member_found": bool(member),
+        "premium_since": (member or {}).get("premium_since"),
+        "member_roles": sorted(m_roles),
+        "booster_role_ids": sorted(booster_ids),
+        "intersection": sorted(m_roles & booster_ids),
+    }
+
 async def _is_booster_async(member: dict | None) -> bool:
     if not member:
         return False
@@ -631,20 +648,27 @@ def logout():
 
 # --------- Gate status ----------
 @gate_router.get("/status")
-async def gate_status(request: Request):
+async def gate_status(request: Request, debug: bool = Query(False)):
     duid = _session_user(request)
     if not duid:
         return {"authenticated": False, "allowed": False, "reason": "not_logged_in"}
 
     member = await _fetch_member(duid)
-    if await _is_booster_async(member):
-        return {"authenticated": True, "allowed": True, "reason": "booster"}
+    allowed_booster = await _is_booster_async(member)
 
-    st = await _sub_status(duid)
-    if _allowed_from_status(st):
-        return {"authenticated": True, "allowed": True, "reason": "paid"}
+    if allowed_booster:
+        payload = {"authenticated": True, "allowed": True, "reason": "booster"}
+    else:
+        st = await _sub_status(duid)
+        if _allowed_from_status(st):
+            payload = {"authenticated": True, "allowed": True, "reason": "paid"}
+        else:
+            payload = {"authenticated": True, "allowed": False, "reason": "paywall"}
 
-    return {"authenticated": True, "allowed": False, "reason": "paywall"}
+    if debug:
+        payload["debug"] = await _debug_booster_view(duid)
+
+    return payload
 
 # --------- Me / Profile ----------
 @me_router.get("")
