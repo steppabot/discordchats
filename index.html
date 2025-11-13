@@ -32,7 +32,19 @@
     /* Attachments */
     .att { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; max-width:100%; }
     .att img, .att video { display:block; height:auto; max-width:420px; border-radius:8px; border:1px solid rgba(255,255,255,.08) }
-
+    
+    .mention-pill {
+      display:inline-flex;
+      align-items:center;
+      padding:0 4px;
+      margin:0 1px;
+      border-radius:3px;
+      background:#3e3f64; /* background */
+      color:#8f93b9;      /* text */
+      font-weight:500;
+      font-size: 13px;
+    }
+    
     /* Primary Discord-style button (login + Open Discord) */
     .discord-login-btn {
       display: inline-flex;
@@ -307,7 +319,75 @@
 <script>
 const API_BASE = "https://api.discordchats.com/api";
 const $ = (s) => document.querySelector(s);
+const mentionCache = new Map();  // id -> name
 
+
+async function resolveMentionIds(ids) {
+  if (!ids || !ids.length) return;
+  const unique = [...new Set(ids)];
+  const qs = new URLSearchParams({ ids: unique.join(",") });
+
+  try {
+    const res = await apiFetch(`/mentions?${qs.toString()}`);
+    if (!res) return;
+
+    Object.entries(res).forEach(([id, name]) => {
+      mentionCache.set(id, name);
+      document.querySelectorAll(`.mention-pill[data-uid="${id}"]`)
+        .forEach(el => {
+          el.textContent = "@" + name;
+        });
+    });
+  } catch (e) {
+    console.error("mention resolve failed", e);
+  }
+}
+
+function contentWithMentions(text) {
+  const frag = document.createDocumentFragment();
+  if (!text) return frag;
+
+  const mentionRe = /<@!?(\d+)>/g;
+  let lastIndex = 0;
+  const pending = new Set();
+
+  while (true) {
+    const match = mentionRe.exec(text);
+    if (!match) break;
+
+    const [full, id] = match;
+
+    // Text before the mention
+    if (match.index > lastIndex) {
+      frag.append(document.createTextNode(text.slice(lastIndex, match.index)));
+    }
+
+    // Mention pill
+    const span = document.createElement("span");
+    span.className = "mention-pill";
+    span.dataset.uid = id;
+    const cached = mentionCache.get(id);
+    span.textContent = "@" + (cached || id);  // temporary label
+    frag.append(span);
+
+    if (!cached) pending.add(id);
+
+    lastIndex = match.index + full.length;
+  }
+
+  // Trailing text
+  if (lastIndex < text.length) {
+    frag.append(document.createTextNode(text.slice(lastIndex)));
+  }
+
+  // Kick off async resolution for any unknown IDs
+  if (pending.size) {
+    resolveMentionIds(Array.from(pending));
+  }
+
+  return frag;
+}
+  
 /* banners */
 function banner(msg, ok=true){
   const bar = document.createElement('div');
@@ -411,7 +491,12 @@ function messageRow(m) {
   const time = document.createElement('span'); time.className='muted'; time.style.fontSize='12px'; time.textContent = m.time || m.ts_local_time || '';
   head.append(name, wolf, time);
 
-  const content = document.createElement('div'); content.className='content'; content.textContent = m.content || '';
+  const content = document.createElement('div');
+  content.className = 'content';
+  content.textContent = '';
+  if (m.content) {
+    content.append(contentWithMentions(m.content));
+  }
 
   const attWrap = document.createElement('div'); attWrap.className='att';
   if (Array.isArray(m.attachments)) {
