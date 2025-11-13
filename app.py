@@ -90,8 +90,8 @@ def _maybe_presign_url(raw_url: Optional[str]) -> Optional[str]:
     if not raw_url:
         return None
 
-    # Bare key (no scheme) → presign as key
-    if "://" not in raw_url:
+    # Bare key (no scheme) → treat as s3 key
+    if "://" not in raw_url and not raw_url.startswith("http"):
         return presign_stackhero(raw_url) or raw_url
 
     low = raw_url.lower()
