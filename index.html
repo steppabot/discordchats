@@ -20,7 +20,7 @@
     .cat { padding:10px 12px; font-weight:700; color:#cdd0d4; letter-spacing:.3px }
 
     .center { display:flex; flex-direction:column; height:100vh }
-    .channel-header { padding:12px 16px; background:var(--bg-2); border-bottom:1px solid #1f2024; display:flex; align-items:center; gap:10px; font-weight:700 }
+    .channel-header { padding:12px 16px; background:var(--bg-2); border-bottom:1px solid #1f2024; display:flex; align-items:center; gap:10px; font-weight:700; justify-content:space-between }
     .muted { color:var(--muted) }
     .feed { padding:14px 16px; overflow:auto }
 
@@ -71,13 +71,46 @@
     #search-input::placeholder{ color:#9aa0a6 }
     .hl{ background:#5f5345; color:#fff; border-radius:4px; padding:0 2px; }
 
+    /* Header user chip */
+    .userbar { display:flex; align-items:center; gap:10px; }
+    .chip { display:inline-flex; align-items:center; gap:8px; background:#1f2024; border:1px solid #16171a; border-radius:999px; padding:6px 10px; }
+    .chip img { width:22px; height:22px; border-radius:50%; }
+    .btn { background:#1f2024; color:#e8eaed; border:1px solid #16171a; border-radius:8px; padding:8px 10px; cursor:pointer; }
+    .btn:hover { background:#24262b; }
+
+    /* Gate overlay */
+    .gate {
+      position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+      background:linear-gradient(180deg, rgba(0,0,0,.65), rgba(0,0,0,.8));
+      z-index:9999; padding:20px;
+    }
+    .gate-card {
+      width:min(560px, 95vw); background:#26282d; border:1px solid #1b1c20; border-radius:14px; padding:18px;
+      box-shadow:0 10px 30px rgba(0,0,0,.45);
+    }
+    .gate-title { font-weight:800; letter-spacing:.3px; font-size:18px; margin-bottom:6px; }
+    .gate-sub { color:#cdd0d4; margin-bottom:12px; }
+    .rowy { display:flex; gap:10px; flex-wrap:wrap; }
+    .pill { flex:1; min-width:220px; padding:14px; background:#202226; border:1px solid #17191d; border-radius:12px; }
+    .pill h4 { margin:0 0 6px; }
+    .pill p { margin:0 0 12px; color:#b9bec6 }
+    .pill .btn { width:100% }
+
+    /* Profile panel */
+    .profile { position:fixed; right:14px; top:62px; width:320px; background:#26282d; border:1px solid #1b1c20; border-radius:12px; padding:12px; display:none; z-index:999; }
+    .profile h3 { margin:0 0 8px; }
+    .kvs { font-size:13px; color:#cdd0d4; }
+    .kvs div { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid rgba(255,255,255,.06); }
+    .kvs div:last-child{ border-bottom:0; }
+    .danger { background:#3a1d1d; border-color:#5a2323 }
+    .danger:hover { background:#431f1f }
+
     /* --- Mobile tweaks --- */
     @media (max-width: 980px){
       .layout{ grid-template-columns:1fr; height:auto; }
       .left{ order:-1; }
       .avatar{ width:36px; height:36px; }
       .feed{ padding:12px; }
-      /* Clamp images fully to viewport width, kill horizontal scroll */
       .att, .feed{ overflow-x:hidden; }
       .att img, .att video{ max-width:100%; width:100%; }
       html, body { overflow-x:hidden; }
@@ -92,7 +125,7 @@
 
       <!-- Mobile menu toggle -->
       <div class="search" style="margin-top:0;margin-bottom:10px;">
-        <button id="menu-toggle" style="width:100%; padding:10px 12px; background:#1f2024; color:#e8eaed; border:1px solid #16171a; border-radius:8px;">≡ Menu</button>
+        <button id="menu-toggle" class="btn" style="width:100%;">≡ Menu</button>
       </div>
 
       <div id="menu-panel">
@@ -126,9 +159,43 @@
     </aside>
 
     <main class="center">
-      <div class="channel-header"><span id="channel-title"># chat-archive</span> <span class="muted" id="count"></span></div>
+      <div class="channel-header">
+        <div><span id="channel-title"># chat-archive</span> <span class="muted" id="count"></span></div>
+        <div class="userbar">
+          <button id="login-btn" class="btn">Sign in with Discord</button>
+          <div id="user-chip" class="chip" style="display:none;">
+            <img id="user-avatar" src="https://cdn.discordapp.com/embed/avatars/0.png" alt="">
+            <span id="user-name">User</span>
+            <button id="profile-btn" class="btn">Profile</button>
+            <button id="logout-btn" class="btn">Logout</button>
+          </div>
+        </div>
+      </div>
       <div id="messages" class="feed"></div>
     </main>
+  </div>
+
+  <!-- Gate overlay -->
+  <div id="gate" class="gate" role="dialog" aria-modal="true">
+    <div class="gate-card">
+      <div class="gate-title" id="gate-title">Welcome to DiscordChats</div>
+      <div class="gate-sub" id="gate-sub">Please sign in to continue.</div>
+      <div id="gate-content"></div>
+    </div>
+  </div>
+
+  <!-- Profile panel -->
+  <div id="profile" class="profile">
+    <h3>Account</h3>
+    <div class="kvs">
+      <div><span>Status</span><strong id="kv-status">—</strong></div>
+      <div><span>Subscription</span><strong id="kv-sub">—</strong></div>
+      <div><span>Period End</span><strong id="kv-end">—</strong></div>
+    </div>
+    <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+      <button id="cancel-sub" class="btn danger">Cancel Subscription</button>
+      <button id="close-prof" class="btn">Close</button>
+    </div>
   </div>
 
 <script>
@@ -143,11 +210,24 @@ function banner(msg, ok=true){
   document.body.prepend(bar);
 }
 
-async function fetchJSON(path) {
+/* small helpers */
+function qsParam(name){
+  const p = new URLSearchParams(location.search); return p.get(name);
+}
+
+async function apiFetch(path, opts={}){
   const url = `${API_BASE}${path}`;
-  const res = await fetch(url, {credentials:'omit'});
+  const res = await fetch(url, { credentials:'include', ...opts });
   if (!res.ok) throw new Error(`${url} → ${res.status}`);
-  return res.json();
+  // handle webhook endpoints that return plain text, etc.
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return res.json();
+  return res.text();
+}
+
+async function fetchJSON(path) {
+  // public data endpoints; credentials include is okay (won't hurt)
+  return apiFetch(path);
 }
 
 function paintName(el, c1) {
@@ -298,7 +378,6 @@ function renderCalendar() {
         [...grid.children].forEach(el => el.classList.remove('selected'));
         day.classList.add('selected');
         await loadMessages(key);
-        // keep viewport steady on iOS
         window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
       });
       if (selectedDay === key) day.classList.add('selected');
@@ -357,7 +436,7 @@ async function loadMessages(dateStr) {
 let currentSearch = "";
 async function fetchSearch(q, limit=1000, offset=0){
   const url = `${API_BASE}/search?` + new URLSearchParams({ q, limit, offset });
-  const res = await fetch(url, { credentials:'omit' });
+  const res = await fetch(url, { credentials:'include' });
   if (!res.ok) throw new Error(`/search ${res.status}`);
   return res.json();
 }
@@ -422,7 +501,6 @@ async function doSearch(e){
     document.getElementById('count').textContent =
       rows.length ? `(${rows.length.toLocaleString()} results)` : '(0 results)';
     document.getElementById('search-hint').textContent = rows.length ? '' : 'No matches.';
-    // keep viewport steady on iOS
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   } catch (err) {
     console.error(err);
@@ -431,13 +509,135 @@ async function doSearch(e){
   }
 }
 
+/* -------- Gate/UI logic -------- */
+const gateEl = $('#gate');
+const gateTitle = $('#gate-title');
+const gateSub = $('#gate-sub');
+const gateContent = $('#gate-content');
+
+async function getGate(){
+  try {
+    return await apiFetch('/gate/status');
+  } catch {
+    return { authenticated:false, allowed:false, reason:'error' };
+  }
+}
+async function getMe(){
+  try {
+    return await apiFetch('/me');
+  } catch {
+    return null;
+  }
+}
+
+function showGate(contentBuilder){
+  gateContent.innerHTML = '';
+  contentBuilder && contentBuilder(gateContent);
+  gateEl.style.display = 'flex';
+}
+function hideGate(){ gateEl.style.display = 'none'; }
+
+async function startLogin(){
+  try{
+    const { url } = await apiFetch('/auth/login');
+    location.href = url; // Discord OAuth
+  }catch(e){ banner('Login init failed.', false); }
+}
+async function startCheckout(){
+  try{
+    const { url } = await apiFetch('/pay/checkout', { method:'POST' });
+    location.href = url; // Stripe Checkout
+  }catch(e){ banner('Checkout init failed.', false); }
+}
+async function doLogout(){
+  try{
+    await apiFetch('/auth/logout', { method:'POST' });
+    // wipe UI state
+    $('#user-chip').style.display = 'none';
+    $('#login-btn').style.display = '';
+    hideProfile();
+    await paintGate(); // re-check
+  }catch(e){ banner('Logout failed.', false); }
+}
+
+function gateNotLoggedIn(){
+  gateTitle.textContent = 'Welcome to DiscordChats';
+  gateSub.textContent = 'Please sign in with Discord to continue.';
+  showGate((wrap)=>{
+    const c = document.createElement('div'); c.className='rowy';
+    const p = document.createElement('div'); p.className='pill';
+    p.innerHTML = `<h4>Sign in</h4><p>Use your Discord account to check access.</p>`;
+    const b = document.createElement('button'); b.className='btn'; b.textContent='Sign in with Discord';
+    b.onclick = startLogin;
+    p.append(b); c.append(p); wrap.append(c);
+  });
+}
+function gatePaywall(){
+  gateTitle.textContent = 'Choose access';
+  gateSub.textContent = 'Boosters are free. Otherwise subscribe for $5/month.';
+  showGate((wrap)=>{
+    const row = document.createElement('div'); row.className='rowy';
+    const a = document.createElement('div'); a.className='pill';
+    a.innerHTML = `<h4>Boost the Server</h4><p>Active Nitro boosters get free access.</p>`;
+    const aBtn = document.createElement('a'); aBtn.className='btn'; aBtn.textContent='Open Discord';
+    aBtn.href = 'https://discord.com/app'; aBtn.target='_blank'; a.append(aBtn);
+
+    const b = document.createElement('div'); b.className='pill';
+    b.innerHTML = `<h4>Subscribe</h4><p>Unlock the archive for $5/month.</p>`;
+    const bBtn = document.createElement('button'); bBtn.className='btn'; bBtn.textContent='Subscribe $5';
+    bBtn.onclick = startCheckout; b.append(bBtn);
+
+    row.append(a,b); wrap.append(row);
+  });
+}
+
+async function paintGate(){
+  const status = await getGate();
+  if (!status.authenticated){
+    $('#login-btn').style.display = '';
+    $('#user-chip').style.display = 'none';
+    gateNotLoggedIn();
+    return;
+  }
+  // authenticated
+  $('#login-btn').style.display = 'none';
+  const me = await getMe();
+  if (me){
+    $('#user-chip').style.display = 'inline-flex';
+    $('#user-name').textContent = me.display_name || ('User ' + me.discord_user_id);
+    $('#user-avatar').src = me.avatar_url || 'https://cdn.discordapp.com/embed/avatars/0.png';
+    // profile kv
+    const isBooster = !!me.is_booster;
+    const sub = me.subscription;
+    const statusText = isBooster ? 'Booster' : (sub?.status || '—');
+    const periodEnd = sub?.current_period_end ? new Date(sub.current_period_end).toLocaleString() : '—';
+    $('#kv-status').textContent = statusText;
+    $('#kv-sub').textContent = sub ? (sub.stripe_sub_id ? 'Stripe' : '—') : (isBooster ? 'Booster' : '—');
+    $('#kv-end').textContent = periodEnd;
+    // cancel button visibility
+    $('#cancel-sub').style.display = (sub && (sub.status === 'active' || sub.status === 'trialing')) ? 'inline-block' : 'none';
+  }
+  if (!status.allowed){
+    gatePaywall();
+  } else {
+    hideGate();
+  }
+}
+
+/* Profile panel */
+function toggleProfile(){
+  const el = $('#profile');
+  el.style.display = (el.style.display === 'block') ? 'none' : 'block';
+}
+function hideProfile(){ $('#profile').style.display = 'none'; }
+
 /* Mobile menu collapse */
 (function(){
   const panel = document.getElementById('menu-panel');
   const btn = document.getElementById('menu-toggle');
   const mq = window.matchMedia('(max-width: 980px)');
   function setInitial(){
-    if (mq.matches){ panel.style.display = 'block'; } else { panel.style.display = 'block'; }
+    panel.style.display = 'block';
   }
   btn.addEventListener('click', ()=> {
     const vis = panel.style.display !== 'none';
@@ -448,12 +648,33 @@ async function doSearch(e){
 })();
 
 /* Boot */
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+  // wire buttons
+  $('#login-btn').addEventListener('click', startLogin);
+  $('#logout-btn').addEventListener('click', doLogout);
+  $('#profile-btn').addEventListener('click', toggleProfile);
+  $('#close-prof').addEventListener('click', hideProfile);
+  $('#cancel-sub').addEventListener('click', async ()=>{
+    if (!confirm('Cancel your subscription now? This will log you out.')) return;
+    try{
+      const res = await apiFetch('/pay/cancel', { method:'POST' });
+      banner('Subscription canceled.', true);
+      await paintGate();
+    }catch(e){ banner('Cancel failed.', false); }
+  });
+
+  // Stripe return messages
+  if (qsParam('paid') === '1') banner('Thanks! Your subscription is active. If you just returned from Stripe, give it a few seconds.', true);
+  if (qsParam('cancel') === '1') banner('Checkout canceled.', false);
+
+  // Load data + gate
   const form = document.getElementById('search-form');
   if (form) { form.setAttribute('action', 'javascript:void(0)'); form.noValidate = true; form.addEventListener('submit', doSearch); }
   const input = document.getElementById('search-input');
   if (input) { input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(e); }); }
-  loadDates();
+
+  await paintGate();    // check auth + gate first
+  await loadDates();    // then render archive
 });
 </script>
 </body>
