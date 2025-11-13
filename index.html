@@ -171,6 +171,7 @@
       color:#8f93b9;
       font-size:12px;
       font-weight:600;
+      cursor:pointer;          /* <--- add this */
     }
     
     /* suggestion dropdown */
@@ -731,6 +732,18 @@ function updateFilterPills(){
     mentionPill.style.display = 'none';
   }
 }
+
+function clearFromFilter(runSearch = true) {
+  fromFilterUser = null;
+  updateFilterPills();
+  if (runSearch) doSearch();
+}
+
+function clearMentionsFilter(runSearch = true) {
+  mentionsFilterUser = null;
+  updateFilterPills();
+  if (runSearch) doSearch();
+}
   
 async function fetchUserSuggestions(term){
   const res = await apiFetch(`/users?` + new URLSearchParams({ term, limit: 20 }));
@@ -1097,6 +1110,16 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (e.key === 'Enter') doSearch(e);
     });
 
+  const fromPillEl = document.getElementById('from-pill');
+  const mentionsPillEl = document.getElementById('mentions-pill');
+
+  if (fromPillEl) {
+    fromPillEl.addEventListener('click', () => clearFromFilter(false));
+  }
+  if (mentionsPillEl) {
+    mentionsPillEl.addEventListener('click', () => clearMentionsFilter(false));
+  }
+    
     input.addEventListener('input', (e) => {
       const v = (e.target.value || '').trimStart();
       const mFrom = v.match(/^from:\s*(.+)?$/i);
