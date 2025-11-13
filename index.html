@@ -311,39 +311,47 @@ function makeFilePill(href, label) {
   a.textContent = label || (href || '').split('/').pop() || 'Open file';
   return a;
 }
-function isImageLike(src, mime) {
-  if (mime && mime.toLowerCase().startsWith('image/')) return true;
-  return /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(src || '');
+function isImageLike(a) {
+  const t = (a.type || a.content_type || "").toLowerCase();
+  if (t.startsWith("image/")) return true;
+
+  const url = a.s3_url || a.url || "";
+  return /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(url.split("?")[0]);
 }
-function isVideoLike(src, mime) {
-  if (mime && mime.toLowerCase().startsWith('video/')) return true;
-  return /\.(mp4|webm|mov)$/i.test(src || '');
+
+function isVideoLike(a) {
+  const t = (a.type || a.content_type || "").toLowerCase();
+  if (t.startsWith("video/")) return true;
+
+  const url = a.s3_url || a.url || "";
+  return /\.(mp4|webm|mov)$/i.test(url.split("?")[0]);
 }
-function buildAttachmentEl(a){
-  const src = a.s3_url || a.url;   // prefer S3 when present
-  const ct  = (a.type || '').toLowerCase();
-  const name = a.filename || (src ? src.split('/').pop() : 'file');
+
+function buildAttachmentEl(a) {
+  const src = a.s3_url || a.url;
+  const name = a.filename || "file";
+
   if (!src) return null;
 
-  if (isImageLike(src, ct)) {
-    const img = document.createElement('img');
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    img.referrerPolicy = 'no-referrer';
-    img.alt = name || '';
+  if (isImageLike(a)) {
+    const img = document.createElement("img");
     img.src = src;
-    img.onerror = () => { img.replaceWith(makeFilePill(src, name)); };
+    img.alt = name;
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.onerror = () => img.replaceWith(makeFilePill(src, name));
     return img;
   }
-  if (isVideoLike(src, ct)) {
-    const v = document.createElement('video');
+
+  if (isVideoLike(a)) {
+    const v = document.createElement("video");
     v.controls = true;
     v.playsInline = true;
-    v.preload = 'metadata';
     v.src = src;
-    v.onerror = () => { v.replaceWith(makeFilePill(src, name)); };
+    v.onerror = () => v.replaceWith(makeFilePill(src, name));
     return v;
   }
+
   return makeFilePill(src, name);
 }
 
