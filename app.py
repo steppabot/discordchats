@@ -496,18 +496,34 @@ async def _upsert_web_user(u: dict):
     """, int(u["id"]), u.get("username"), u.get("global_name"), _avatar_url(u))
 
 async def _fetch_member(duid: int) -> Optional[dict]:
-    if not BOT_TOKEN or not GUILD_ID: return None
+    if not BOT_TOKEN or not GUILD_ID:
+        return None
     url = f"{DISCORD_API}/guilds/{GUILD_ID}/members/{duid}"
     headers = {"Authorization": f"Bot {BOT_TOKEN}"}
     async with httpx.AsyncClient(timeout=8.0) as client:
         r = await client.get(url, headers=headers)
-        if r.status_code == 404: return None
+        if r.status_code == 404:
+            log.info("Member %s not found in guild %s", duid, GUILD_ID)
+            return None
         r.raise_for_status()
-        return r.json()
+        m = r.json()
+        # TEMP: peek at roles/premium_since once to confirm
+        log.info("Member %s roles=%s premium_since=%s", duid, m.get("roles"), m.get("premium_since"))
+        return m
 
 def _is_booster(member: dict | None) -> bool:
-    if not member: return False
-    roles = { int(r) for r in member.get("roles", []) }
+    if not member:
+        return False
+
+    # If Discord says they're boosting, trust it
+    if member.get("premium_since"):
+        return True
+
+    # Fallback to role id(s) in env
+    try:
+        roles = {int(r) for r in member.get("roles", [])}
+    except Exception:
+        roles = set()
     return any(r in roles for r in BOOSTER_ROLE_IDS)
 
 async def _sub_status(duid: int) -> Optional[dict]:
