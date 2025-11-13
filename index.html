@@ -371,7 +371,7 @@ function isVideoLike(a) {
 }
 
 function buildAttachmentEl(a) {
-  const src = a.s3_url || a.url;
+  const src = a.url; // already the best URL (Stackhero presigned if available)
   const name = a.filename || "file";
   if (!src) return null;
 
