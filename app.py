@@ -103,12 +103,34 @@ def _maybe_presign_url(raw_url: Optional[str]) -> Optional[str]:
     return raw_url
 
 def _normalize_atts(atts: Any) -> List[Dict[str, Any]]:
-    ...
+    """
+    Normalize attachments into: [{url, filename, type, size}]
+    Accepts:
+      - list of dicts       (our normal join)
+      - list of strings     (raw URLs)
+      - JSON string         (either of the above)
+      - None / empty
+    Also presigns Stackhero/S3 links/keys.
+    """
+    if not atts:
+        return []
+
+    # If DB returned a JSON string
+    if isinstance(atts, str):
+        try:
+            atts = json.loads(atts)
+        except Exception:
+            # Treat as a single URL string
+            return [{"url": _maybe_presign_url(atts)}]
+
+    out: List[Dict[str, Any]] = []
+
     if isinstance(atts, list):
         for a in atts:
             if isinstance(a, str):
                 out.append({"url": _maybe_presign_url(a)})
                 continue
+
             if isinstance(a, dict):
                 # PREFER s3_url or s3_key, and only fall back to Discord URL
                 raw = a.get("s3_url") or a.get("s3_key") or a.get("url")
@@ -119,7 +141,9 @@ def _normalize_atts(atts: Any) -> List[Dict[str, Any]]:
                     "type": a.get("type") or a.get("content_type"),
                     "size": a.get("size") or a.get("size_bytes"),
                 })
+
     return out
+
 
 # ----------------------------
 # FastAPI app
