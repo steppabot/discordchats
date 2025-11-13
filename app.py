@@ -4,9 +4,11 @@ import logging
 from typing import Optional, Dict, Any, List
 import asyncpg
 import boto3
-from fastapi import FastAPI, HTTPException, Query
+import httpx, hmac, hashlib, time, base64
+from fastapi import FastAPI, HTTPException, Query, Request, Response, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRouter
 from datetime import date as Date
 from urllib.parse import urlparse
 
@@ -21,6 +23,25 @@ S3_ENDPOINT   = os.getenv("STACKHERO_S3_ENDPOINT")
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL missing")
+
+# Discord / Stripe / Site env
+DISCORD_OAUTH = "https://discord.com/api/oauth2"
+DISCORD_API   = "https://discord.com/api"
+
+CLIENT_ID     = os.getenv("DISCORD_CLIENT_ID")
+CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
+REDIRECT_URI  = os.getenv("DISCORD_REDIRECT_URI")
+GUILD_ID      = int(os.getenv("DISCORD_GUILD_ID", "0") or 0)
+BOT_TOKEN     = os.getenv("BOT_TOKEN")
+BOOSTER_ROLE_IDS = { int(x) for x in (os.getenv("BOOSTER_ROLE_IDS","").split(",")) if x.strip() }
+
+STRIPE_SECRET         = os.getenv("STRIPE_SECRET")
+STRIPE_PRICE_B5       = os.getenv("STRIPE_PRICE_B5")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+SITE_BASE_URL         = os.getenv("SITE_BASE_URL")
+
+SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "dc_sid")
+SESSION_SECRET      = (os.getenv("SESSION_SECRET") or "dev_dev_dev").encode("utf-8")
 
 log = logging.getLogger("uvicorn.error")
 
@@ -143,6 +164,7 @@ async def _startup():
     _pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
 
     async with _pool.acquire() as conn:
+        # --- archive table ---
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS archived_messages (
             message_id      BIGINT PRIMARY KEY,
@@ -160,6 +182,33 @@ async def _startup():
         );
         """)
 
+        # --- Auth/Billing tables ---
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS web_users (
+          discord_user_id BIGINT PRIMARY KEY,
+          username        TEXT,
+          global_name     TEXT,
+          avatar_url      TEXT,
+          last_login_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """)
+
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS subscriptions (
+          discord_user_id    BIGINT PRIMARY KEY,
+          stripe_customer_id TEXT UNIQUE,
+          stripe_sub_id      TEXT UNIQUE,
+          status             TEXT NOT NULL,                  -- 'active' | 'trialing' | 'past_due' | 'canceled'...
+          current_period_end TIMESTAMPTZ,
+          updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """)
+
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_status ON subscriptions(status);")
+
+# ------------------------------
+# Health / data APIs
+# ------------------------------
 @app.get("/api/health")
 async def health():
     try:
@@ -287,7 +336,6 @@ async def messages(
         log.exception("/api/messages failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-
 # ------------------------------
 # Full-archive search (earliest → latest)
 # ------------------------------
@@ -385,3 +433,283 @@ async def search_messages(
     except Exception as e:
         log.exception("/api/search failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+# ============================
+# Auth / Gate / Billing
+# ============================
+auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
+gate_router = APIRouter(prefix="/api/gate", tags=["gate"])
+pay_router  = APIRouter(prefix="/api/pay", tags=["pay"])
+me_router   = APIRouter(prefix="/api/me", tags=["me"])
+
+# --- Simple signed cookie session (HMAC) ---
+def _sign(v: str) -> str:
+    mac = hmac.new(SESSION_SECRET, v.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{v}.{mac}"
+
+def _verify(sig: str) -> Optional[str]:
+    if not sig or "." not in sig: return None
+    v, mac = sig.rsplit(".", 1)
+    good = hmac.new(SESSION_SECRET, v.encode("utf-8"), hashlib.sha256).hexdigest()
+    if hmac.compare_digest(mac, good): return v
+    return None
+
+def _set_session(resp: Response, discord_user_id: int):
+    payload = f"{discord_user_id}:{int(time.time())}"
+    resp.set_cookie(
+        SESSION_COOKIE_NAME, _sign(payload),
+        httponly=True, secure=True, samesite="Lax", max_age=60*60*24*30
+    )
+
+def _clear_session(resp: Response):
+    resp.delete_cookie(SESSION_COOKIE_NAME)
+
+async def _db_execute(sql: str, *params):
+    async with _pool.acquire() as conn:
+        return await conn.execute(sql, *params)
+
+async def _db_fetchrow(sql: str, *params):
+    async with _pool.acquire() as conn:
+        return await conn.fetchrow(sql, *params)
+
+async def _db_fetchval(sql: str, *params):
+    async with _pool.acquire() as conn:
+        return await conn.fetchval(sql, *params)
+
+def _avatar_url(u: dict) -> Optional[str]:
+    # Discord CDN pattern (covers default avatar as well)
+    if u.get("avatar"):
+        return f"https://cdn.discordapp.com/avatars/{u['id']}/{u['avatar']}.png?size=128"
+    idx = int(u["discriminator"]) % 5 if "discriminator" in u else 0
+    return f"https://cdn.discordapp.com/embed/avatars/{idx}.png"
+
+async def _upsert_web_user(u: dict):
+    await _db_execute("""
+        INSERT INTO web_users (discord_user_id, username, global_name, avatar_url, last_login_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        ON CONFLICT (discord_user_id) DO UPDATE SET
+          username=EXCLUDED.username,
+          global_name=EXCLUDED.global_name,
+          avatar_url=EXCLUDED.avatar_url,
+          last_login_at=NOW()
+    """, int(u["id"]), u.get("username"), u.get("global_name"), _avatar_url(u))
+
+async def _fetch_member(duid: int) -> Optional[dict]:
+    if not BOT_TOKEN or not GUILD_ID: return None
+    url = f"{DISCORD_API}/guilds/{GUILD_ID}/members/{duid}"
+    headers = {"Authorization": f"Bot {BOT_TOKEN}"}
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        r = await client.get(url, headers=headers)
+        if r.status_code == 404: return None
+        r.raise_for_status()
+        return r.json()
+
+def _is_booster(member: dict | None) -> bool:
+    if not member: return False
+    roles = { int(r) for r in member.get("roles", []) }
+    return any(r in roles for r in BOOSTER_ROLE_IDS)
+
+async def _sub_status(duid: int) -> Optional[dict]:
+    row = await _db_fetchrow("""
+      SELECT status, current_period_end, stripe_sub_id, stripe_customer_id
+      FROM subscriptions WHERE discord_user_id=$1
+    """, duid)
+    if not row: return None
+    return dict(row)
+
+def _allowed_from_status(st: Optional[dict]) -> bool:
+    if not st: return False
+    return st["status"] in ("active","trialing") and (st["current_period_end"] is None or st["current_period_end"] > Date.today())
+
+def _session_user(request: Request) -> Optional[int]:
+    raw = request.cookies.get(SESSION_COOKIE_NAME)
+    ver = _verify(raw) if raw else None
+    if not ver: return None
+    try:
+        duid = int(ver.split(":")[0]); return duid
+    except Exception:
+        return None
+
+# --------- OAuth ----------
+@auth_router.get("/login")
+def login():
+    from urllib.parse import urlencode
+    params = {
+        "client_id": CLIENT_ID,
+        "redirect_uri": REDIRECT_URI,
+        "response_type": "code",
+        "scope": "identify guilds.members.read",
+        "prompt": "none"
+    }
+    return JSONResponse({"url": f"{DISCORD_OAUTH}/authorize?{urlencode(params)}"})
+
+@auth_router.get("/discord/callback")
+async def callback(code: str, request: Request):
+    async with httpx.AsyncClient() as client:
+        tok = await client.post(f"{DISCORD_OAUTH}/token",
+            data={
+                "client_id": CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": REDIRECT_URI,
+            },
+            headers={"Content-Type":"application/x-www-form-urlencoded"}
+        )
+        tok.raise_for_status()
+        at = tok.json()["access_token"]
+
+        me = await client.get(f"{DISCORD_API}/users/@me",
+                              headers={"Authorization": f"Bearer {at}"})
+        me.raise_for_status()
+        u = me.json()
+
+    await _upsert_web_user(u)
+    resp = Response(status_code=302)
+    resp.headers["Location"] = "/"
+    _set_session(resp, int(u["id"]))
+    return resp
+
+@auth_router.post("/logout")
+def logout():
+    resp = Response(status_code=204)
+    _clear_session(resp)
+    return resp
+
+# --------- Gate status ----------
+@gate_router.get("/status")
+async def gate_status(request: Request):
+    duid = _session_user(request)
+    if not duid:
+        return {"authenticated": False, "allowed": False, "reason": "not_logged_in"}
+
+    member = await _fetch_member(duid)
+    if _is_booster(member):
+        return {"authenticated": True, "allowed": True, "reason": "booster"}
+
+    st = await _sub_status(duid)
+    if _allowed_from_status(st):
+        return {"authenticated": True, "allowed": True, "reason": "paid"}
+
+    return {"authenticated": True, "allowed": False, "reason": "paywall"}
+
+# --------- Me / Profile ----------
+@me_router.get("")
+async def me(request: Request):
+    duid = _session_user(request)
+    if not duid: raise HTTPException(401, "Not logged in")
+    user = await _db_fetchrow("SELECT * FROM web_users WHERE discord_user_id=$1", duid)
+    st   = await _sub_status(duid)
+    member = await _fetch_member(duid)
+    return {
+        "discord_user_id": duid,
+        "display_name": (user["global_name"] or user["username"]) if user else None,
+        "avatar_url": user["avatar_url"] if user else None,
+        "is_booster": _is_booster(member),
+        "subscription": st or None
+    }
+
+# --------- Stripe: create checkout session ----------
+@pay_router.post("/checkout")
+async def checkout(request: Request):
+    duid = _session_user(request)
+    if not duid: raise HTTPException(401, "Not logged in")
+    import stripe
+    stripe.api_key = STRIPE_SECRET
+
+    sess = stripe.checkout.Session.create(
+        mode="subscription",
+        line_items=[{"price": STRIPE_PRICE_B5, "quantity": 1}],
+        success_url=f"{SITE_BASE_URL}/?paid=1",
+        cancel_url=f"{SITE_BASE_URL}/?cancel=1",
+        client_reference_id=str(duid),
+        metadata={"discord_user_id": str(duid)},
+    )
+    return {"url": sess.url}
+
+# --------- Stripe webhook (keep URL secret) ----------
+@pay_router.post("/webhook")
+async def stripe_webhook(request: Request, stripe_signature: str = Header(None, convert_underscores=False)):
+    import stripe
+    stripe.api_key = STRIPE_SECRET
+    payload = await request.body()
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, stripe_signature, STRIPE_WEBHOOK_SECRET
+        )
+    except Exception as e:
+        raise HTTPException(400, f"Webhook signature verification failed: {e}")
+
+    typ = event["type"]
+    obj = event["data"]["object"]
+
+    # Link discord_user_id: prefer client_reference_id, else metadata
+    duid = None
+    if "client_reference_id" in obj and obj["client_reference_id"]:
+        try:
+            duid = int(obj["client_reference_id"])
+        except Exception:
+            duid = None
+    if duid is None and obj.get("metadata", {}).get("discord_user_id"):
+        try:
+            duid = int(obj["metadata"]["discord_user_id"])
+        except Exception:
+            duid = None
+
+    async def upsert(duid_val: int, sub: dict):
+        return await _db_execute("""
+          INSERT INTO subscriptions (discord_user_id, stripe_customer_id, stripe_sub_id, status, current_period_end, updated_at)
+          VALUES ($1,$2,$3,$4, to_timestamp($5), NOW())
+          ON CONFLICT (discord_user_id) DO UPDATE SET
+            stripe_customer_id=EXCLUDED.stripe_customer_id,
+            stripe_sub_id=EXCLUDED.stripe_sub_id,
+            status=EXCLUDED.status,
+            current_period_end=EXCLUDED.current_period_end,
+            updated_at=NOW()
+        """, duid_val, sub["customer"], sub["id"], sub["status"], sub["current_period_end"])
+
+    if typ == "checkout.session.completed":
+        if duid and obj.get("subscription"):
+            sub = stripe.Subscription.retrieve(obj["subscription"])
+            await upsert(duid, sub)
+
+    elif typ in ("customer.subscription.created", "customer.subscription.updated"):
+        if duid:
+            await upsert(duid, obj)
+
+    elif typ == "customer.subscription.deleted":
+        if duid:
+            await _db_execute("""
+              UPDATE subscriptions SET status='canceled', updated_at=NOW() WHERE discord_user_id=$1
+            """, duid)
+
+    return {"received": True}
+
+# --------- Cancel subscription (Profile page button) ----------
+@pay_router.post("/cancel")
+async def cancel_subscription(request: Request):
+    duid = _session_user(request)
+    if not duid: raise HTTPException(401, "Not logged in")
+    row = await _db_fetchrow("SELECT stripe_sub_id FROM subscriptions WHERE discord_user_id=$1", duid)
+    if not row or not row["stripe_sub_id"]:
+        raise HTTPException(404, "No active subscription")
+
+    import stripe
+    stripe.api_key = STRIPE_SECRET
+    stripe.Subscription.delete(row["stripe_sub_id"])
+
+    await _db_execute("""
+      UPDATE subscriptions SET status='canceled', updated_at=NOW() WHERE discord_user_id=$1
+    """, duid)
+
+    # immediately gate and log them out
+    resp = Response(status_code=200, media_type="application/json")
+    _clear_session(resp)
+    resp.body = b'{"ok":true,"canceled":true}'
+    return resp
+
+# mount routers (after app is created)
+app.include_router(auth_router)
+app.include_router(gate_router)
+app.include_router(pay_router)
+app.include_router(me_router)
