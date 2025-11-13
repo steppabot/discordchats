@@ -103,45 +103,22 @@ def _maybe_presign_url(raw_url: Optional[str]) -> Optional[str]:
     return raw_url
 
 def _normalize_atts(atts: Any) -> List[Dict[str, Any]]:
-    """
-    Prefer Stackhero S3 presigned URLs using s3_key (or s3_url if present).
-    Fallback to Discord CDN URL only when needed.
-    """
-    if not atts:
-        return []
-
-    if isinstance(atts, str):
-        try:
-            atts = json.loads(atts)
-        except Exception:
-            u = _maybe_presign_url(atts)
-            return [{"url": u}]
-
-    out = []
-    for a in atts:
-        if isinstance(a, str):
-            u = _maybe_presign_url(a)
-            out.append({"url": u})
-            continue
-
-        if isinstance(a, dict):
-            # stackhero priority:
-            raw = (
-                a.get("s3_url") or
-                a.get("s3_key") or
-                a.get("url") or   # fallback discord
-                None
-            )
-
-            url = _maybe_presign_url(raw)
-
-            out.append({
-                "url": url,
-                "filename": a.get("filename"),
-                "type": a.get("content_type"),
-                "size": a.get("size_bytes"),
-            })
-
+    ...
+    if isinstance(atts, list):
+        for a in atts:
+            if isinstance(a, str):
+                out.append({"url": _maybe_presign_url(a)})
+                continue
+            if isinstance(a, dict):
+                # PREFER s3_url or s3_key, and only fall back to Discord URL
+                raw = a.get("s3_url") or a.get("s3_key") or a.get("url")
+                url = _maybe_presign_url(raw)
+                out.append({
+                    "url": url,
+                    "filename": a.get("filename"),
+                    "type": a.get("type") or a.get("content_type"),
+                    "size": a.get("size") or a.get("size_bytes"),
+                })
     return out
 
 # ----------------------------
@@ -280,6 +257,7 @@ async def messages(
                           json_agg(
                             json_build_object(
                               's3_url',   a.s3_url,
+                              's3_key',   a.s3_key,
                               'url',      a.url,
                               'filename', a.filename,
                               'type',     a.content_type,
@@ -374,6 +352,7 @@ async def search_messages(
                           json_agg(
                             json_build_object(
                               's3_url',   a.s3_url,
+                              's3_key',   a.s3_key,
                               'url',      a.url,
                               'filename', a.filename,
                               'type',     a.content_type,
