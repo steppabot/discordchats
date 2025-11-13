@@ -742,33 +742,96 @@ function hideProfile(){ $('#profile').style.display = 'none'; }
 
 /* Boot */
 window.addEventListener('DOMContentLoaded', async () => {
+
   // wire buttons
   $('#login-btn').addEventListener('click', startLogin);
   $('#logout-btn').addEventListener('click', doLogout);
   $('#profile-btn').addEventListener('click', toggleProfile);
   $('#close-prof').addEventListener('click', hideProfile);
-  $('#cancel-sub').addEventListener('click', async ()=>{
+  $('#cancel-sub').addEventListener('click', async () => {
     if (!confirm('Cancel your subscription now? This will log you out.')) return;
-    try{
-      const res = await apiFetch('/pay/cancel', { method:'POST' });
+    try {
+      await apiFetch('/pay/cancel', { method:'POST' });
       banner('Subscription canceled.', true);
-      await paintGate();
-    }catch(e){ banner('Cancel failed.', false); }
+      // reload gate state after cancellation
+      await bootGate();
+    } catch (e) {
+      banner('Cancel failed.', false);
+    }
   });
 
   // Stripe return messages
-  if (qsParam('paid') === '1') banner('Thanks! Your subscription is active. If you just returned from Stripe, give it a few seconds.', true);
-  if (qsParam('cancel') === '1') banner('Checkout canceled.', false);
+  if (qsParam('paid') === '1')
+    banner('Thanks! Your subscription is active. If you just returned from Stripe, give it a few seconds.', true);
 
-  // Load data + gate
+  if (qsParam('cancel') === '1')
+    banner('Checkout canceled.', false);
+
+  // Search box events
   const form = document.getElementById('search-form');
-  if (form) { form.setAttribute('action', 'javascript:void(0)'); form.noValidate = true; form.addEventListener('submit', doSearch); }
-  const input = document.getElementById('search-input');
-  if (input) { input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(e); }); }
+  if (form) {
+    form.setAttribute('action', 'javascript:void(0)');
+    form.noValidate = true;
+    form.addEventListener('submit', doSearch);
+  }
 
-  await paintGate();    // check auth + gate first
-  await loadDates();    // then render archive
+  const input = document.getElementById('search-input');
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doSearch(e);
+    });
+  }
+
+  // 🔥 New secure boot process
+  await bootGate();
 });
+
+/* -----------------------------------------------------
+   SECURE GATE LOADING LOGIC (NEW)
+----------------------------------------------------- */
+async function bootGate() {
+
+  const status = await getGate();
+
+  // 🔒 Not logged in
+  if (!status.authenticated) {
+    $('#login-btn').style.display = '';
+    $('#user-chip').style.display = 'none';
+    gateNotLoggedIn();
+    return; // ⛔ STOP — do NOT load archive
+  }
+
+  // Logged in → show chip
+  const me = await getMe();
+  if (me) {
+    $('#user-chip').style.display = 'inline-flex';
+    $('#user-name').textContent = me.display_name || ('User ' + me.discord_user_id);
+    $('#user-avatar').src = me.avatar_url || 'https://cdn.discordapp.com/embed/avatars/0.png';
+
+    const isBooster = !!me.is_booster;
+    const sub = me.subscription;
+
+    $('#kv-status').textContent = isBooster ? 'Booster' : (sub?.status || '—');
+    $('#kv-sub').textContent = sub ? (sub.stripe_sub_id ? 'Stripe' : '—') : (isBooster ? 'Booster' : '—');
+    $('#kv-end').textContent = sub?.current_period_end ?
+      new Date(sub.current_period_end).toLocaleString() : '—';
+
+    $('#cancel-sub').style.display =
+      (sub && (sub.status === 'active' || sub.status === 'trialing'))
+        ? 'inline-block'
+        : 'none';
+  }
+
+  // 🧱 Authenticated but NOT allowed
+  if (!status.allowed) {
+    gatePaywall();
+    return; // ⛔ STOP — do NOT load archive
+  }
+
+  // 🎉 Allowed → remove gate + load archive
+  hideGate();
+  await loadDates();
+}
 </script>
 </body>
 </html>
