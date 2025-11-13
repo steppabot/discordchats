@@ -33,7 +33,7 @@ CLIENT_ID     = os.getenv("DISCORD_CLIENT_ID")
 CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
 REDIRECT_URI  = os.getenv("DISCORD_REDIRECT_URI")
 GUILD_ID      = int(os.getenv("DISCORD_GUILD_ID", "0") or 0)
-BOT_TOKEN     = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("DISCORD_TOKEN")
 BOOSTER_ROLE_IDS = { int(x) for x in (os.getenv("BOOSTER_ROLE_IDS","").split(",")) if x.strip() }
 
 STRIPE_SECRET         = os.getenv("STRIPE_SECRET")
