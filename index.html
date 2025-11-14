@@ -333,6 +333,7 @@
               <span id="from-pill" class="search-pill" style="display:none;"></span>
               <span id="mentions-pill" class="search-pill" style="display:none;"></span>
               <span id="hasimage-pill" class="search-pill" style="display:none;"></span>
+              <span id="on-pill" class="search-pill" style="display:none;"></span>   <!-- NEW -->
               <input id="search-input" type="text" placeholder="Find Messages…" />
             </div>
           </form>
@@ -393,6 +394,7 @@ const mentionCache = new Map();  // id -> name
 let fromFilterUser = null;        // { id, name }
 let mentionsFilterUser = null;    // { id, name }
 let hasImageFilter = false;       // true when has:image is active
+let onDateFilter = null;          // "YYYY-MM-DD" when on: is active
 let fromSuggestTimer = null;
 let currentSuggestKind = null;    // "from" | "mentions" | null
 
@@ -765,6 +767,9 @@ async function fetchSearch(q, limit=1000, offset=0){
     // backend can use this to only return messages that have image attachments
     params.append('has_image', '1');
   }
+  if (onDateFilter) {
+    params.append('on_date', onDateFilter);   // NEW
+  }
 
   const url = `${API_BASE}/search?` + params.toString();
   const res = await fetch(url, { credentials:'include' });
@@ -776,6 +781,7 @@ function updateFilterPills(){
   const fromPill = document.getElementById('from-pill');
   const mentionPill = document.getElementById('mentions-pill');
   const hasImagePill = document.getElementById('hasimage-pill');
+  const onPill = document.getElementById('on-pill');            // NEW
 
   if (fromFilterUser){
     fromPill.style.display = 'inline-flex';
@@ -797,8 +803,15 @@ function updateFilterPills(){
   } else {
     hasImagePill.style.display = 'none';
   }
-}
 
+  if (onDateFilter){                                           
+    onPill.style.display = 'inline-flex';
+    onPill.textContent = `on: ${onDateFilter}`;
+  } else {
+    onPill.style.display = 'none';
+  }
+}
+  
 function clearFromFilter(runSearch = true) {
   fromFilterUser = null;
   updateFilterPills();
@@ -813,6 +826,12 @@ function clearMentionsFilter(runSearch = true) {
 
 function clearHasImageFilter(runSearch = true) {
   hasImageFilter = false;
+  updateFilterPills();
+  if (runSearch) doSearch();
+}
+
+function clearOnFilter(runSearch = true) {
+  onDateFilter = null;
   updateFilterPills();
   if (runSearch) doSearch();
 }
@@ -948,8 +967,9 @@ async function doSearch(e) {
   if (fromFilterUser)     titleBits.push(`from: ${fromFilterUser.name}`);
   if (mentionsFilterUser) titleBits.push(`mentions: ${mentionsFilterUser.name}`);
   if (hasImageFilter)     titleBits.push('has:image');
+  if (onDateFilter)       titleBits.push(`on: ${onDateFilter}`);\
   if (q)                  titleBits.push(`"${q}"`);
-
+  
   document.getElementById('channel-title').textContent =
     '# search — ' + (titleBits.length ? titleBits.join(' · ') : 'results');
 
@@ -1231,6 +1251,10 @@ window.addEventListener('DOMContentLoaded', async () => {
             clearHasImageFilter(true);  // also re-run search
             return;
           }
+          if (onDateFilter) {               // NEW
+            clearOnFilter(true);
+            return;
+          }
         }
       }
     
@@ -1259,7 +1283,19 @@ window.addEventListener('DOMContentLoaded', async () => {
         // user manually removed the token from the text
         // (we do not auto-clear the filter here; they'll clear via pill/backspace)
       }
-    
+
+      const onMatch = raw.match(/\bon:\s*(\d{4}-\d{2}-\d{2})/i);
+      if (onMatch) {
+        const dateStr = onMatch[1];
+        onDateFilter = dateStr;
+        updateFilterPills();
+  
+        // strip just that on: token from the visible input
+        raw = raw.replace(onMatch[0], '').replace(/\s+/g, ' ').trimStart();
+        v = raw;
+        e.target.value = raw;
+      }
+      
       // 1) If we don't have a token yet, see if the user just typed `from:` or `mentions:`
       if (!currentSuggestKind) {
         const lower = v.toLowerCase();
@@ -1329,6 +1365,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (hasImagePill) {
     hasImagePill.addEventListener('click', () => {
       clearHasImageFilter(true);
+    });
+  }
+
+  const onPill = document.getElementById('on-pill');
+  if (onPill) {
+    onPill.addEventListener('click', () => {
+      clearOnFilter(true);   // NEW
     });
   }
 
