@@ -574,10 +574,9 @@ function isVideoLike(a) {
 }
 
 function buildAttachmentEl(a) {
-  // Prefer S3 → then normalized url → then any proxy_url we might have
-  const src = a.s3_url || a.url || a.proxy_url;
-  const name = a.filename || "file";
-
+  // Prefer s3_url if present, then url
+  const src = a.s3_url || a.url || "";
+  const name = a.filename || (src.split("/").pop() || "file");
   if (!src) return null;
 
   if (isImageLike(a)) {
@@ -601,6 +600,7 @@ function buildAttachmentEl(a) {
 
   return makeFilePill(src, name);
 }
+
 
 /* Message rows */
 function messageRow(m) {
@@ -878,30 +878,52 @@ function setContentWithHighlight(containerEl, text, query){
     containerEl.append(mark); i = idx + q.length;
   }
 }
+  
 function messageRowWithHL(m, query){
-  const row = document.createElement('div'); row.className='row';
-  const av = document.createElement('img'); av.className='avatar';
-  av.src = m.avatar_url || 'https://cdn.discordapp.com/embed/avatars/0.png';
-  const body = document.createElement('div'); body.style.flex='1';
+  const row = document.createElement('div');
+  row.className='row';
 
-  const head = document.createElement('div'); head.style.cssText='display:flex;align-items:center;gap:8px';
-  const name = document.createElement('span'); name.className='name'; name.textContent = m.display_name || 'Unknown';
+  const av = document.createElement('img');
+  av.className='avatar';
+  av.src = m.avatar_url || 'https://cdn.discordapp.com/embed/avatars/0.png';
+
+  const body = document.createElement('div');
+  body.style.flex='1';
+
+  const head = document.createElement('div');
+  head.style.cssText='display:flex;align-items:center;gap:8px';
+
+  const name = document.createElement('span');
+  name.className='name';
+  name.textContent = m.display_name || 'Unknown';
   paintName(name, m.role_color_1);
-  const wolf = document.createElement('span'); wolf.textContent='🐺';
-  const time = document.createElement('span'); time.className='muted'; time.style.fontSize='12px';
+
+  const wolf = document.createElement('span');
+  wolf.textContent='🐺';
+
+  const time = document.createElement('span');
+  time.className='muted';
+  time.style.fontSize='12px';
   time.textContent = (m.date ? `${m.date} ` : "") + (m.time || m.ts_local_time || '');
+
   head.append(name, wolf, time);
 
-  const content = document.createElement('div'); content.className='content';
-  setContentWithHighlight(content, m.content || '', query);
+  // 👇 THIS is the important change: use mention-aware + highlight
+  const content = document.createElement('div');
+  content.className='content';
 
-  const attWrap = document.createElement('div'); attWrap.className='att';
+  const frag = contentWithMentionsAndHighlight(m.content || '', query);
+  if (frag) content.append(frag);
+
+  const attWrap = document.createElement('div');
+  attWrap.className='att';
   if (Array.isArray(m.attachments)) {
     for (const a of m.attachments) {
       const el = buildAttachmentEl(a || {});
       if (el) attWrap.append(el);
     }
   }
+
   body.append(head, content, attWrap);
   row.append(av, body);
   return row;
