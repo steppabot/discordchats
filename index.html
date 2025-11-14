@@ -767,7 +767,9 @@ async function fetchSearch(q, limit=1000, offset=0){
     // backend can use this to only return messages that have image attachments
     params.append('has_image', '1');
   }
-  if (onDateFilter)       titleBits.push(`on: ${onDateFilter}`);
+  if (onDateFilter) {
+    params.append('on_date', onDateFilter);   // <-- send date to backend
+  }
 
   const url = `${API_BASE}/search?` + params.toString();
   const res = await fetch(url, { credentials:'include' });
@@ -965,7 +967,7 @@ async function doSearch(e) {
   if (fromFilterUser)     titleBits.push(`from: ${fromFilterUser.name}`);
   if (mentionsFilterUser) titleBits.push(`mentions: ${mentionsFilterUser.name}`);
   if (hasImageFilter)     titleBits.push('has:image');
-  if (onDateFilter)       titleBits.push(`on: ${onDateFilter}`);\
+  if (onDateFilter)       titleBits.push(`on: ${onDateFilter}`);
   if (q)                  titleBits.push(`"${q}"`);
   
   document.getElementById('channel-title').textContent =
