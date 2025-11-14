@@ -104,7 +104,7 @@ def _maybe_presign_url(raw_url: Optional[str]) -> Optional[str]:
 
 def _normalize_atts(atts: Any) -> List[Dict[str, Any]]:
     """
-    Normalize attachments into: [{url, filename, type, size}]
+    Normalize attachments into: [{url, s3_url, filename, type, size}]
     Accepts:
       - list of dicts       (our normal join)
       - list of strings     (raw URLs)
@@ -120,30 +120,46 @@ def _normalize_atts(atts: Any) -> List[Dict[str, Any]]:
         try:
             atts = json.loads(atts)
         except Exception:
-            # Treat as a single URL string
-            return [{"url": _maybe_presign_url(atts)}]
+            # Treat as a single URL string or key
+            presigned = _maybe_presign_url(atts)
+            return [{
+                "url": presigned,
+                "s3_url": presigned,
+                "filename": None,
+                "type": None,
+                "size": None,
+            }]
 
     out: List[Dict[str, Any]] = []
 
     if isinstance(atts, list):
         for a in atts:
             if isinstance(a, str):
-                out.append({"url": _maybe_presign_url(a)})
+                presigned = _maybe_presign_url(a)
+                out.append({
+                    "url": presigned,
+                    "s3_url": presigned,
+                    "filename": None,
+                    "type": None,
+                    "size": None,
+                })
                 continue
 
             if isinstance(a, dict):
-                # PREFER s3_url or s3_key, and only fall back to Discord URL
+                # Prefer s3_url or s3_key (bare key), then raw url
                 raw = a.get("s3_url") or a.get("s3_key") or a.get("url")
-                url = _maybe_presign_url(raw)
+                presigned = _maybe_presign_url(raw)
+
                 out.append({
-                    "url": url,
+                    # send both so frontend code can use either
+                    "url": presigned,
+                    "s3_url": presigned,
                     "filename": a.get("filename"),
                     "type": a.get("type") or a.get("content_type"),
                     "size": a.get("size") or a.get("size_bytes"),
                 })
 
     return out
-
 
 # ----------------------------
 # FastAPI app
