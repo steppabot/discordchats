@@ -374,8 +374,8 @@ async def search_messages(
 ):
     term = (q or "").strip()
     # allow searches that are purely "has:image"
-    if not term and user_id is None and mentioned_id is None and not has_image:
-        raise HTTPException(status_code=400, detail="Need q, user_id, mentioned_id, or has_image")
+    if not term and user_id is None and mentioned_id is None and not has_image and not on_date:
+        raise HTTPException(status_code=400, detail="Need q, user_id, mentioned_id, has_image, or on_date")
 
     try:
         async with _pool.acquire() as conn:
