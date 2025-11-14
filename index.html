@@ -767,9 +767,7 @@ async function fetchSearch(q, limit=1000, offset=0){
     // backend can use this to only return messages that have image attachments
     params.append('has_image', '1');
   }
-  if (onDateFilter) {
-    params.append('on_date', onDateFilter);   // NEW
-  }
+  if (onDateFilter)       titleBits.push(`on: ${onDateFilter}`);
 
   const url = `${API_BASE}/search?` + params.toString();
   const res = await fetch(url, { credentials:'include' });
