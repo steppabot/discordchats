@@ -556,23 +556,28 @@ function makeFilePill(href, label) {
   a.textContent = label || (href || '').split('/').pop() || 'Open file';
   return a;
 }
+  
 function isImageLike(a) {
   const t = (a.type || a.content_type || "").toLowerCase();
   if (t.startsWith("image/")) return true;
-  const url = a.s3_url || a.url || "";
-  return /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(url.split("?")[0]);
+
+  const url = (a.s3_url || a.url || a.proxy_url || "").split("?")[0];
+  return /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(url);
 }
 
 function isVideoLike(a) {
   const t = (a.type || a.content_type || "").toLowerCase();
   if (t.startsWith("video/")) return true;
-  const url = a.s3_url || a.url || "";
-  return /\.(mp4|webm|mov)$/i.test(url.split("?")[0]);
+
+  const url = (a.s3_url || a.url || a.proxy_url || "").split("?")[0];
+  return /\.(mp4|webm|mov)$/i.test(url);
 }
 
 function buildAttachmentEl(a) {
-  const src = a.url; // already the best URL (Stackhero presigned if available)
+  // Prefer S3 → then normalized url → then any proxy_url we might have
+  const src = a.s3_url || a.url || a.proxy_url;
   const name = a.filename || "file";
+
   if (!src) return null;
 
   if (isImageLike(a)) {
