@@ -957,7 +957,7 @@ async function doSearch(e) {
   document.getElementById('search-hint').textContent = 'Searching…';
 
   try {
-    const { ok, rows } = await fetchSearch(q, 2000, 0);
+    const { ok, rows } = await fetchSearch(q, 200, 0);
 
     const wrap = document.getElementById('messages');
     wrap.innerHTML = '';
