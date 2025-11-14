@@ -766,14 +766,14 @@ function updateFilterPills(){
 
   if (fromFilterUser){
     fromPill.style.display = 'inline-flex';
-    fromPill.textContent = `from: ${fromFilterUser.name}`;
+    fromPill.textContent = `from: ${fromFilterUser.name} ×`;
   } else {
     fromPill.style.display = 'none';
   }
 
   if (mentionsFilterUser){
     mentionPill.style.display = 'inline-flex';
-    mentionPill.textContent = `mentions: ${mentionsFilterUser.name}`;
+    mentionPill.textContent = `mentions: ${mentionsFilterUser.name} ×`;
   } else {
     mentionPill.style.display = 'none';
   }
@@ -1151,66 +1151,102 @@ window.addEventListener('DOMContentLoaded', async () => {
     form.addEventListener('submit', doSearch);
   }
 
-const input = document.getElementById('search-input');
-if (input) {
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') doSearch(e);
-  });
+  const input = document.getElementById('search-input');
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      // Backspace: when box is empty and we're NOT in the middle of typing "from:" or "mentions:",
+      // pop the last pill (mentions first, then from)
+      if (e.key === 'Backspace') {
+        const value = e.target.value || '';
+        if (!value && !currentSuggestKind) {
+          const suggestList = document.getElementById('from-suggest');
+          if (suggestList) suggestList.style.display = 'none';
 
-  input.addEventListener('input', (e) => {
-    const suggestList = document.getElementById('from-suggest');
-    let raw = e.target.value || '';
-    let v   = raw.trimStart();
+          if (mentionsFilterUser) {
+            clearMentionsFilter(true);  // also re-run search
+            return;
+          }
+          if (fromFilterUser) {
+            clearFromFilter(true);      // also re-run search
+            return;
+          }
+        }
+      }
 
-    // 1) If we don't have a token yet, see if the user just typed `from:` or `mentions:`
-    if (!currentSuggestKind) {
-      const lower = v.toLowerCase();
+      if (e.key === 'Enter') {
+        doSearch(e);
+      }
+    });
 
-      if (lower.startsWith('from:')) {
-        currentSuggestKind = 'from';
+    input.addEventListener('input', (e) => {
+      const suggestList = document.getElementById('from-suggest');
+      let raw = e.target.value || '';
+      let v   = raw.trimStart();
 
-        // show a "from:" pill immediately
-        const pill = document.getElementById('from-pill');
-        pill.style.display = 'inline-flex';
-        pill.textContent = 'from:';
+      // 1) If we don't have a token yet, see if the user just typed `from:` or `mentions:`
+      if (!currentSuggestKind) {
+        const lower = v.toLowerCase();
 
-        // strip "from:" out of the visible input so they just type the name
-        v = v.slice('from:'.length).trimStart();
-        e.target.value = v;
-      } else if (lower.startsWith('mentions:')) {
-        currentSuggestKind = 'mentions';
+        if (lower.startsWith('from:')) {
+          currentSuggestKind = 'from';
 
-        const pill = document.getElementById('mentions-pill');
-        pill.style.display = 'inline-flex';
-        pill.textContent = 'mentions:';
+          // show a "from:" pill immediately
+          const pill = document.getElementById('from-pill');
+          pill.style.display = 'inline-flex';
+          pill.textContent = 'from:';
 
-        v = v.slice('mentions:'.length).trimStart();
-        e.target.value = v;
-      } else {
-        // not starting a token → no suggestions
+          // strip "from:" out of the visible input so they just type the name
+          v = v.slice('from:'.length).trimStart();
+          e.target.value = v;
+        } else if (lower.startsWith('mentions:')) {
+          currentSuggestKind = 'mentions';
+
+          const pill = document.getElementById('mentions-pill');
+          pill.style.display = 'inline-flex';
+          pill.textContent = 'mentions:';
+
+          v = v.slice('mentions:'.length).trimStart();
+          e.target.value = v;
+        } else {
+          // not starting a token → no suggestions
+          suggestList.style.display = 'none';
+          return;
+        }
+      }
+
+      // 2) We are in "from" or "mentions" mode: treat whatever is in the box as the user term
+      const term = v.trim();
+      if (!term) {
         suggestList.style.display = 'none';
         return;
       }
-    }
 
-    // 2) We are in "from" or "mentions" mode: treat whatever is in the box as the user term
-    const term = v.trim();
-    if (!term) {
-      suggestList.style.display = 'none';
-      return;
-    }
+      clearTimeout(fromSuggestTimer);
+      fromSuggestTimer = setTimeout(async () => {
+        try {
+          const list = await fetchUserSuggestions(term);
+          showFromSuggestions(list);
+        } catch (err) {
+          console.error(err);
+        }
+      }, 200);
+    });
+  }
 
-    clearTimeout(fromSuggestTimer);
-    fromSuggestTimer = setTimeout(async () => {
-      try {
-        const list = await fetchUserSuggestions(term);
-        showFromSuggestions(list);
-      } catch (err) {
-        console.error(err);
-      }
-    }, 200);
-  });
-}
+  // Allow clicking the pills themselves to clear the filter
+  const fromPill = document.getElementById('from-pill');
+  if (fromPill) {
+    fromPill.addEventListener('click', () => {
+      clearFromFilter(true); // also re-run search / restore calendar
+    });
+  }
+
+  const mentionsPill = document.getElementById('mentions-pill');
+  if (mentionsPill) {
+    mentionsPill.addEventListener('click', () => {
+      clearMentionsFilter(true);
+    });
+  }
 
   // New secure boot process
   await bootGate();
