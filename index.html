@@ -332,6 +332,7 @@
             <div class="search-input-wrap">
               <span id="from-pill" class="search-pill" style="display:none;"></span>
               <span id="mentions-pill" class="search-pill" style="display:none;"></span>
+              <span id="hasimage-pill" class="search-pill" style="display:none;"></span>
               <input id="search-input" type="text" placeholder="Find Messages…" />
             </div>
           </form>
@@ -391,6 +392,7 @@ const $ = (s) => document.querySelector(s);
 const mentionCache = new Map();  // id -> name
 let fromFilterUser = null;        // { id, name }
 let mentionsFilterUser = null;    // { id, name }
+let hasImageFilter = false;       // true when has:image is active
 let fromSuggestTimer = null;
 let currentSuggestKind = null;    // "from" | "mentions" | null
 
@@ -754,6 +756,11 @@ async function fetchSearch(q, limit=1000, offset=0){
   if (mentionsFilterUser && mentionsFilterUser.id) {
     params.append('mentioned_id', String(mentionsFilterUser.id));
   }
+  if (hasImageFilter) {
+    // backend can use this to only return messages that have image attachments
+    params.append('has_image', '1');
+  }
+
   const url = `${API_BASE}/search?` + params.toString();
   const res = await fetch(url, { credentials:'include' });
   if (!res.ok) throw new Error(`/search ${res.status}`);
@@ -763,19 +770,27 @@ async function fetchSearch(q, limit=1000, offset=0){
 function updateFilterPills(){
   const fromPill = document.getElementById('from-pill');
   const mentionPill = document.getElementById('mentions-pill');
+  const hasImagePill = document.getElementById('hasimage-pill');
 
   if (fromFilterUser){
     fromPill.style.display = 'inline-flex';
-    fromPill.textContent = `from: ${fromFilterUser.name} ×`;
+    fromPill.textContent = `from: ${fromFilterUser.name}`;
   } else {
     fromPill.style.display = 'none';
   }
 
   if (mentionsFilterUser){
     mentionPill.style.display = 'inline-flex';
-    mentionPill.textContent = `mentions: ${mentionsFilterUser.name} ×`;
+    mentionPill.textContent = `mentions: ${mentionsFilterUser.name}`;
   } else {
     mentionPill.style.display = 'none';
+  }
+
+  if (hasImageFilter){
+    hasImagePill.style.display = 'inline-flex';
+    hasImagePill.textContent = 'has:image';
+  } else {
+    hasImagePill.style.display = 'none';
   }
 }
 
@@ -787,6 +802,12 @@ function clearFromFilter(runSearch = true) {
 
 function clearMentionsFilter(runSearch = true) {
   mentionsFilterUser = null;
+  updateFilterPills();
+  if (runSearch) doSearch();
+}
+
+function clearHasImageFilter(runSearch = true) {
+  hasImageFilter = false;
   updateFilterPills();
   if (runSearch) doSearch();
 }
@@ -881,7 +902,6 @@ function messageRowWithHL(m, query){
   return row;
 }
 
-  
 async function doSearch(e) {
   if (e) {
     e.preventDefault();
@@ -891,15 +911,16 @@ async function doSearch(e) {
   const input = document.getElementById('search-input');
   const q = (input.value || '').trim();
 
-  // If there is no text AND no filters, don't do anything
-  if (!q && !fromFilterUser && !mentionsFilterUser) return;
+  // If there is no text AND no filters at all, don't do anything
+  if (!q && !fromFilterUser && !mentionsFilterUser && !hasImageFilter) return;
 
   currentSearch = q;
 
-  // Build nice title bits like: # search — from: Gizmo · mentions: g2eg · "clip"
+  // Build nice title bits like: # search — from: Gizmo · mentions: g2eg · has:image · "clip"
   const titleBits = [];
   if (fromFilterUser)     titleBits.push(`from: ${fromFilterUser.name}`);
   if (mentionsFilterUser) titleBits.push(`mentions: ${mentionsFilterUser.name}`);
+  if (hasImageFilter)     titleBits.push('has:image');
   if (q)                  titleBits.push(`"${q}"`);
 
   document.getElementById('channel-title').textContent =
@@ -909,20 +930,28 @@ async function doSearch(e) {
   document.getElementById('search-hint').textContent = 'Searching…';
 
   try {
-    // fetchSearch now already knows how to append user_id / mentioned_id
     const { ok, rows } = await fetchSearch(q, 2000, 0);
 
     const wrap = document.getElementById('messages');
     wrap.innerHTML = '';
 
+    let shown = 0;
     for (const m of rows) {
+      // If has:image is active, make sure this message actually has an image attachment
+      if (hasImageFilter) {
+        const atts = Array.isArray(m.attachments) ? m.attachments : [];
+        const hasImg = atts.some(a => isImageLike(a || {}));
+        if (!hasImg) continue;
+      }
+
       wrap.append(messageRowWithHL(m, q));
+      shown++;
     }
 
     document.getElementById('count').textContent =
-      rows.length ? `(${rows.length.toLocaleString()} results)` : '(0 results)';
+      shown ? `(${shown.toLocaleString()} results)` : '(0 results)';
     document.getElementById('search-hint').textContent =
-      rows.length ? '' : 'No matches.';
+      shown ? '' : 'No matches.';
 
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   } catch (err) {
@@ -931,6 +960,7 @@ async function doSearch(e) {
     document.getElementById('search-hint').textContent = 'Search failed.';
   }
 }
+
 
 
 
@@ -1155,13 +1185,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (input) {
     input.addEventListener('keydown', (e) => {
       // Backspace: when box is empty and we're NOT in the middle of typing "from:" or "mentions:",
-      // pop the last pill (mentions first, then from)
+      // pop the last pill (mentions → from → has:image)
       if (e.key === 'Backspace') {
         const value = e.target.value || '';
         if (!value && !currentSuggestKind) {
           const suggestList = document.getElementById('from-suggest');
           if (suggestList) suggestList.style.display = 'none';
-
+    
           if (mentionsFilterUser) {
             clearMentionsFilter(true);  // also re-run search
             return;
@@ -1170,9 +1200,13 @@ window.addEventListener('DOMContentLoaded', async () => {
             clearFromFilter(true);      // also re-run search
             return;
           }
+          if (hasImageFilter) {
+            clearHasImageFilter(true);  // also re-run search
+            return;
+          }
         }
       }
-
+    
       if (e.key === 'Enter') {
         doSearch(e);
       }
@@ -1182,29 +1216,45 @@ window.addEventListener('DOMContentLoaded', async () => {
       const suggestList = document.getElementById('from-suggest');
       let raw = e.target.value || '';
       let v   = raw.trimStart();
-
+    
+      // --- Handle has:image token anywhere in the raw string ---
+      const lowerRaw = raw.toLowerCase();
+      if (lowerRaw.includes('has:image')) {
+        if (!hasImageFilter) {
+          hasImageFilter = true;
+          updateFilterPills();
+        }
+        // strip all occurrences of has:image from the visible input
+        raw = raw.replace(/has:image/gi, '').replace(/\s+/g, ' ').trimStart();
+        v = raw;
+        e.target.value = raw;
+      } else if (hasImageFilter && !lowerRaw.includes('has:image')) {
+        // user manually removed the token from the text
+        // (we do not auto-clear the filter here; they'll clear via pill/backspace)
+      }
+    
       // 1) If we don't have a token yet, see if the user just typed `from:` or `mentions:`
       if (!currentSuggestKind) {
         const lower = v.toLowerCase();
-
+    
         if (lower.startsWith('from:')) {
           currentSuggestKind = 'from';
-
+    
           // show a "from:" pill immediately
           const pill = document.getElementById('from-pill');
           pill.style.display = 'inline-flex';
           pill.textContent = 'from:';
-
+    
           // strip "from:" out of the visible input so they just type the name
           v = v.slice('from:'.length).trimStart();
           e.target.value = v;
         } else if (lower.startsWith('mentions:')) {
           currentSuggestKind = 'mentions';
-
+    
           const pill = document.getElementById('mentions-pill');
           pill.style.display = 'inline-flex';
           pill.textContent = 'mentions:';
-
+    
           v = v.slice('mentions:'.length).trimStart();
           e.target.value = v;
         } else {
@@ -1213,14 +1263,14 @@ window.addEventListener('DOMContentLoaded', async () => {
           return;
         }
       }
-
+    
       // 2) We are in "from" or "mentions" mode: treat whatever is in the box as the user term
       const term = v.trim();
       if (!term) {
         suggestList.style.display = 'none';
         return;
       }
-
+    
       clearTimeout(fromSuggestTimer);
       fromSuggestTimer = setTimeout(async () => {
         try {
@@ -1245,6 +1295,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (mentionsPill) {
     mentionsPill.addEventListener('click', () => {
       clearMentionsFilter(true);
+    });
+  }
+
+  const hasImagePill = document.getElementById('hasimage-pill');
+  if (hasImagePill) {
+    hasImagePill.addEventListener('click', () => {
+      clearHasImageFilter(true);
     });
   }
 
