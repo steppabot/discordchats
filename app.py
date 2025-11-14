@@ -370,6 +370,7 @@ async def search_messages(
     user_id: Optional[int] = Query(None, description="Filter by User"),
     mentioned_id: Optional[int] = Query(None, description="Filter by Mentions"),
     has_image: Optional[int] = Query(None, description="1 to require messages with attachments"),
+    on_date: Optional[str] = Query(None, description="Exact Date YYYY-MM-DD"),
 ):
     term = (q or "").strip()
     # allow searches that are purely "has:image"
@@ -409,6 +410,15 @@ async def search_messages(
                 where_clauses.append(
                     "EXISTS (SELECT 1 FROM archived_attachments a2 WHERE a2.message_id = m.message_id)"
                 )
+            # on: YYYY-MM-DD date filter
+            if on_date:
+                try:
+                    d = Date.fromisoformat(on_date)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Bad date; use YYYY-MM-DD")
+                idx = len(params) + 1
+                where_clauses.append(f"m.ts_local_date = ${idx}")
+                params.append(d)
 
             where_sql = " AND ".join(where_clauses) or "TRUE"
 
