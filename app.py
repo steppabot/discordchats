@@ -369,11 +369,12 @@ async def search_messages(
     offset: int = Query(0, ge=0, le=100000),
     user_id: Optional[int] = Query(None, description="Filter by User"),
     mentioned_id: Optional[int] = Query(None, description="Filter by Mentions"),
+    has_image: Optional[int] = Query(None, description="1 to require messages with attachments"),
 ):
     term = (q or "").strip()
-
-    if not term and user_id is None and mentioned_id is None:
-        raise HTTPException(status_code=400, detail="Need q, user_id, or mentioned_id")
+    # allow searches that are purely "has:image"
+    if not term and user_id is None and mentioned_id is None and not has_image:
+        raise HTTPException(status_code=400, detail="Need q, user_id, mentioned_id, or has_image")
 
     try:
         async with _pool.acquire() as conn:
@@ -403,6 +404,12 @@ async def search_messages(
                 params.append(f"<@{mentioned_id}>")
                 params.append(f"<@!{mentioned_id}>")
 
+            # NEW: require at least one attachment if has_image is set
+            if has_image:
+                where_clauses.append(
+                    "EXISTS (SELECT 1 FROM archived_attachments a2 WHERE a2.message_id = m.message_id)"
+                )
+
             where_sql = " AND ".join(where_clauses) or "TRUE"
 
             sql = f"""
@@ -421,7 +428,7 @@ async def search_messages(
                       json_agg(
                         json_build_object(
                           's3_url',   a.s3_url,
-                          's3_key',   a.s3_key,      -- 🔹 add this
+                          's3_key',   a.s3_key,
                           'url',      a.url,
                           'filename', a.filename,
                           'type',     a.content_type,
