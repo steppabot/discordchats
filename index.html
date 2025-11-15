@@ -808,18 +808,25 @@ async function loadMessages(dateStr) {
 
 async function loadMoreDayMessages() {
   if (!currentDay || !dayHasMore || dayLoading || searchMode) return;
+
+  const dayAtStart = currentDay;   // 🧠 capture the day this load is for
   dayLoading = true;
 
   try {
     const inner = document.getElementById('messages-inner') || document.getElementById('messages');
 
     const params = new URLSearchParams({
-      date: currentDay,
+      date: dayAtStart,
       limit: String(DAY_PAGE_SIZE),
       offset: String(dayOffset),
     });
 
     const msgs = await fetchJSON(`/messages?${params.toString()}`);
+
+    // If user clicked a different day while this was loading, drop these results
+    if (dayAtStart !== currentDay) {
+      return;
+    }
 
     let added = 0;
     for (const m of msgs) {
@@ -828,20 +835,26 @@ async function loadMoreDayMessages() {
     }
 
     dayLoadedCount += added;
-    dayOffset += msgs.length; // advance by rows returned
+    dayOffset += msgs.length;
 
+    const totalForDay = avail.get(currentDay);
     document.getElementById('count').textContent =
-      dayLoadedCount ? `(${dayLoadedCount.toLocaleString()} msgs)` : '(0 msgs)';
+      typeof totalForDay === 'number'
+        ? `(${totalForDay.toLocaleString()} msgs)`
+        : (dayLoadedCount ? `(${dayLoadedCount.toLocaleString()} msgs)` : '(0 msgs)');
 
     if (msgs.length < DAY_PAGE_SIZE) {
-      dayHasMore = false; // no more pages
+      dayHasMore = false;
     }
   } catch (e) {
     console.error(e);
     banner('Failed to load more messages.', false);
     dayHasMore = false;
   } finally {
-    dayLoading = false;
+    // Only clear the flag if we're still on the same day
+    if (dayAtStart === currentDay) {
+      dayLoading = false;
+    }
   }
 }
 
