@@ -271,6 +271,7 @@ async def dates():
 async def messages(
     date: str = Query(..., description="YYYY-MM-DD (local day)"),
     limit: int = Query(2000, ge=1, le=10000),
+    offset: int = Query(0, ge=0, le=100000),  # 👈 NEW
 ):
     # Validate date
     try:
@@ -312,9 +313,9 @@ async def messages(
                     WHERE m.ts_local_date = $1
                     GROUP BY m.message_id
                     ORDER BY m.ts_utc ASC, m.channel_id ASC, m.message_id ASC
-                    LIMIT $2
+                    LIMIT $2 OFFSET $3
                     """,
-                    d, limit
+                    d, limit, offset  
                 )
             except Exception as join_err:
                 log.warning("Attachments join skipped: %s", join_err)
@@ -333,9 +334,9 @@ async def messages(
                     FROM archived_messages m
                     WHERE m.ts_local_date = $1
                     ORDER BY m.ts_utc ASC, m.channel_id ASC, m.message_id ASC
-                    LIMIT $2
+                    LIMIT $2 OFFSET $3 
                     """,
-                    d, limit
+                    d, limit, offset
                 )
 
         # Convert to plain dicts and normalize attachments
