@@ -363,10 +363,13 @@
         </div>
       </div>
     
-      <div id="messages" class="feed"></div>
-      <!-- Load more for search -->
-      <div id="search-more" style="display:none; text-align:center; padding:12px 0 18px;">
-        <button id="search-more-btn" class="btn">Load More</button>
+      <div id="messages" class="feed">
+        <div id="messages-inner"></div>
+      
+        <!-- Load more for search -->
+        <div id="search-more" style="display:none; text-align:center; padding:12px 0 18px;">
+          <button id="search-more-btn" class="btn">Load More</button>
+        </div>
       </div>
     </main>
 
@@ -753,7 +756,7 @@ async function loadMessages(dateStr) {
     document.getElementById('search-more').style.display = 'none';
     document.getElementById('channel-title').textContent = `# chat-archive — ${dateStr}`;
     const msgs = await fetchJSON(`/messages?date=${encodeURIComponent(dateStr)}`);
-    const wrap = document.getElementById('messages'); wrap.innerHTML = '';
+    const wrap = document.getElementById('messages-inner'); wrap.innerHTML = '';
     for (const m of msgs) wrap.append(messageRow(m));
     document.getElementById('count').textContent = msgs.length ? `(${msgs.length.toLocaleString()} msgs)` : '(0 msgs)';
     if (!msgs.length) wrap.innerHTML = '<div class="muted">No messages for this day.</div>';
@@ -994,7 +997,7 @@ async function doSearch(e) {
   try {
     const { ok, rows } = await fetchSearch(q, searchLimit, searchOffset);
 
-    const wrap = document.getElementById('messages');
+    const wrap = document.getElementById('messages-inner');
     wrap.innerHTML = '';
 
     let shown = 0;
@@ -1042,7 +1045,7 @@ async function loadMoreSearch() {
   try {
     const { ok, rows } = await fetchSearch(currentSearch, searchLimit, searchOffset);
 
-    const wrap = document.getElementById('messages');
+    const wrap = document.getElementById('messages-inner');
     let added = 0;
 
     for (const m of rows) {
@@ -1479,22 +1482,24 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // 🔥 Infinite scroll: auto-load more when near bottom
-  window.addEventListener('scroll', () => {
-    if (!searchMode) return;  // only in search mode
-
-    const nearBottom =
-      window.innerHeight + window.scrollY >= document.body.offsetHeight - 300;
-
-    if (!nearBottom) return;
-
-    const moreWrap = document.getElementById('search-more');
-    if (moreWrap && moreWrap.style.display === 'block') {
-      // hide so we don't spam calls
-      moreWrap.style.display = 'none';
-      loadMoreSearch();
-    }
-  });
+  // 🔥 Infinite scroll: auto-load more when feed is near bottom
+  const feed = document.getElementById('messages');
+  if (feed) {
+    feed.addEventListener('scroll', () => {
+      if (!searchMode) return;
+  
+      const nearBottom =
+        feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 300;
+  
+      if (!nearBottom) return;
+  
+      const moreWrap = document.getElementById('search-more');
+      if (moreWrap && moreWrap.style.display === 'block') {
+        moreWrap.style.display = 'none';
+        loadMoreSearch();
+      }
+    });
+  }
 
   // New secure boot process
   await bootGate();
