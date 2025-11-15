@@ -407,6 +407,12 @@ let hasImageFilter = false;       // true when has:image is active
 let onDateFilter = null;          // "YYYY-MM-DD" when on: is active
 let fromSuggestTimer = null;
 let currentSuggestKind = null;    // "from" | "mentions" | null
+let currentDay = null;           // "YYYY-MM-DD" currently loaded in calendar view
+let dayOffset = 0;               // how many messages we’ve already fetched for that day
+let dayLoadedCount = 0;          // how many we’ve rendered so far
+const DAY_PAGE_SIZE = 2000;      // matches backend default limit
+let dayHasMore = false;          // whether backend might have more rows
+let dayLoading = false;          // guard against double-loads
 
 async function resolveMentionIds(ids) {
   if (!ids || !ids.length) return;
@@ -753,15 +759,89 @@ async function loadDates() {
 async function loadMessages(dateStr) {
   try {
     searchMode = false;
+
+    // reset day pagination state
+    currentDay = dateStr;
+    dayOffset = 0;
+    dayLoadedCount = 0;
+    dayHasMore = true;
+    dayLoading = false;
+
     document.getElementById('search-more').style.display = 'none';
     document.getElementById('channel-title').textContent = `# chat-archive — ${dateStr}`;
-    const msgs = await fetchJSON(`/messages?date=${encodeURIComponent(dateStr)}`);
-    const wrap = document.getElementById('messages-inner'); wrap.innerHTML = '';
-    for (const m of msgs) wrap.append(messageRow(m));
-    document.getElementById('count').textContent = msgs.length ? `(${msgs.length.toLocaleString()} msgs)` : '(0 msgs)';
-    if (!msgs.length) wrap.innerHTML = '<div class="muted">No messages for this day.</div>';
+
+    const wrap = document.getElementById('messages');
+    const inner = document.getElementById('messages-inner') || wrap;
+
+    inner.innerHTML = '';
+
+    const params = new URLSearchParams({
+      date: dateStr,
+      limit: String(DAY_PAGE_SIZE),
+      offset: String(dayOffset),
+    });
+
+    const msgs = await fetchJSON(`/messages?${params.toString()}`);
+
+    for (const m of msgs) inner.append(messageRow(m));
+
+    dayLoadedCount = msgs.length;
+    dayOffset += msgs.length;
+    dayHasMore = (msgs.length === DAY_PAGE_SIZE);
+
+    document.getElementById('count').textContent =
+      dayLoadedCount ? `(${dayLoadedCount.toLocaleString()} msgs)` : '(0 msgs)';
+
+    if (!msgs.length) {
+      inner.innerHTML = '<div class="muted">No messages for this day.</div>';
+      dayHasMore = false;
+    }
+
+    // Scroll back to top of the feed
+    const feed = document.getElementById('messages');
+    if (feed) feed.scrollTop = 0;
   } catch (e) {
-    console.error(e); banner('Failed to load messages.', false);
+    console.error(e);
+    banner('Failed to load messages.', false);
+  }
+}
+
+async function loadMoreDayMessages() {
+  if (!currentDay || !dayHasMore || dayLoading || searchMode) return;
+  dayLoading = true;
+
+  try {
+    const inner = document.getElementById('messages-inner') || document.getElementById('messages');
+
+    const params = new URLSearchParams({
+      date: currentDay,
+      limit: String(DAY_PAGE_SIZE),
+      offset: String(dayOffset),
+    });
+
+    const msgs = await fetchJSON(`/messages?${params.toString()}`);
+
+    let added = 0;
+    for (const m of msgs) {
+      inner.append(messageRow(m));
+      added++;
+    }
+
+    dayLoadedCount += added;
+    dayOffset += msgs.length; // advance by rows returned
+
+    document.getElementById('count').textContent =
+      dayLoadedCount ? `(${dayLoadedCount.toLocaleString()} msgs)` : '(0 msgs)';
+
+    if (msgs.length < DAY_PAGE_SIZE) {
+      dayHasMore = false; // no more pages
+    }
+  } catch (e) {
+    console.error(e);
+    banner('Failed to load more messages.', false);
+    dayHasMore = false;
+  } finally {
+    dayLoading = false;
   }
 }
 
@@ -1486,17 +1566,21 @@ window.addEventListener('DOMContentLoaded', async () => {
   const feed = document.getElementById('messages');
   if (feed) {
     feed.addEventListener('scroll', () => {
-      if (!searchMode) return;
-  
       const nearBottom =
         feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 300;
   
       if (!nearBottom) return;
   
-      const moreWrap = document.getElementById('search-more');
-      if (moreWrap && moreWrap.style.display === 'block') {
-        moreWrap.style.display = 'none';
-        loadMoreSearch();
+      if (searchMode) {
+        // search mode paging
+        const moreWrap = document.getElementById('search-more');
+        if (moreWrap && moreWrap.style.display === 'block') {
+          moreWrap.style.display = 'none';
+          loadMoreSearch();
+        }
+      } else {
+        // calendar/day view paging
+        loadMoreDayMessages();
       }
     });
   }
