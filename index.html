@@ -1104,7 +1104,7 @@ function showGate(contentBuilder){
   gateEl.style.display = 'flex';
 }
 function hideGate(){ gateEl.style.display = 'none'; }
-
+  
 async function startLogin(){
   try{
     const { url } = await apiFetch('/auth/login');
@@ -1126,6 +1126,36 @@ async function doLogout(){
     hideProfile();
     await bootGate(); // re-check with new flow
   }catch(e){ banner('Logout failed.', false); }
+}
+
+async function checkBoostThenMaybeOpenDiscord(btn) {
+  if (btn) {
+    btn.disabled = true;
+    const labelSpan = btn.querySelector('span');
+    if (labelSpan) labelSpan.textContent = 'Checking…';
+  }
+
+  try {
+    const status = await getGate();  // calls /api/gate/status
+
+    if (status && status.allowed) {
+      // User is now a booster or paid → rerun full gate boot
+      await bootGate();
+    } else {
+      // Still not allowed → send them to Discord to boost
+      window.open('https://discord.com/app', '_blank', 'noopener,noreferrer');
+    }
+  } catch (e) {
+    console.error('Boost check failed', e);
+    // Fallback: still open Discord so they can at least get to the server
+    window.open('https://discord.com/app', '_blank', 'noopener,noreferrer');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      const labelSpan = btn.querySelector('span');
+      if (labelSpan) labelSpan.textContent = "I've Boosted";
+    }
+  }
 }
 
 /* Not logged in gate */
@@ -1175,20 +1205,20 @@ function gatePaywall(){
     a.className='pill';
     a.innerHTML = `<h4>Boost the Server</h4><p>Active Nitro boosters get free access.</p>`;
 
-    const aBtn = document.createElement('a');
+    // NEW: "I've Boosted" button that rechecks their booster status
+    const aBtn = document.createElement('button');
+    aBtn.type = 'button';
     aBtn.className = 'discord-login-btn';
-    aBtn.href = 'https://discord.com/app';
-    aBtn.target = '_blank';
-    aBtn.rel = 'noreferrer noopener';
+    aBtn.onclick = () => checkBoostThenMaybeOpenDiscord(aBtn);
     aBtn.innerHTML = `
       <img class="discord-logo-img"
         src="https://cdn.jsdelivr.net/gh/simple-icons/simple-icons/icons/discord.svg"
         alt="Discord">
-      <span>Open Discord</span>
+      <span>I've Boosted</span>
     `;
     a.append(aBtn);
 
-    // Subscribe pill
+    // Subscribe pill (unchanged)
     const b = document.createElement('div'); 
     b.className='pill';
     b.innerHTML = `<h4>Subscribe</h4><p>Unlock the archive with a monthly sub.</p>`;
@@ -1204,6 +1234,7 @@ function gatePaywall(){
     wrap.append(row);
   });
 }
+
 
 async function paintGate(){  // legacy helper (not used by boot, but kept just in case)
   const status = await getGate();
