@@ -361,6 +361,10 @@
       </div>
     
       <div id="messages" class="feed"></div>
+      <!-- Load more for search -->
+      <div id="search-more" style="display:none; text-align:center; padding:12px 0 18px;">
+        <button id="search-more-btn" class="btn">Load More</button>
+      </div>
     </main>
 
 
@@ -742,6 +746,8 @@ async function loadDates() {
 
 async function loadMessages(dateStr) {
   try {
+    searchMode = false;
+    document.getElementById('search-more').style.display = 'none';
     document.getElementById('channel-title').textContent = `# chat-archive — ${dateStr}`;
     const msgs = await fetchJSON(`/messages?date=${encodeURIComponent(dateStr)}`);
     const wrap = document.getElementById('messages'); wrap.innerHTML = '';
@@ -755,6 +761,10 @@ async function loadMessages(dateStr) {
 
 /* ---------- Search (newest → oldest handled server-side) ---------- */
 let currentSearch = "";
+let searchMode = false;       // are we viewing search results vs calendar?
+let searchLimit = 200;
+let searchOffset = 0;         // how many rows we've already fetched
+let searchShownCount = 0;     // how many rows we've shown so far
 async function fetchSearch(q, limit=1000, offset=0){
   const params = new URLSearchParams({ q, limit, offset });
   if (fromFilterUser && fromFilterUser.id) {
@@ -958,18 +968,20 @@ async function doSearch(e) {
   const q = (input.value || '').trim();
 
   // If there is no text AND no filters at all, don't do anything
-  if (!q && !fromFilterUser && !mentionsFilterUser && !hasImageFilter) return;
+  if (!q && !fromFilterUser && !mentionsFilterUser && !hasImageFilter && !onDateFilter) return;
 
   currentSearch = q;
+  searchMode = true;
+  searchOffset = 0;
+  searchShownCount = 0;
 
-  // Build nice title bits like: # search — from: Gizmo · mentions: g2eg · has:image · "clip"
   const titleBits = [];
   if (fromFilterUser)     titleBits.push(`from: ${fromFilterUser.name}`);
   if (mentionsFilterUser) titleBits.push(`mentions: ${mentionsFilterUser.name}`);
   if (hasImageFilter)     titleBits.push('has:image');
   if (onDateFilter)       titleBits.push(`on: ${onDateFilter}`);
   if (q)                  titleBits.push(`"${q}"`);
-  
+
   document.getElementById('channel-title').textContent =
     '# search — ' + (titleBits.length ? titleBits.join(' · ') : 'results');
 
@@ -977,39 +989,90 @@ async function doSearch(e) {
   document.getElementById('search-hint').textContent = 'Searching…';
 
   try {
-    const { ok, rows } = await fetchSearch(q, 200, 0);
+    const { ok, rows } = await fetchSearch(q, searchLimit, searchOffset);
 
     const wrap = document.getElementById('messages');
     wrap.innerHTML = '';
 
     let shown = 0;
     for (const m of rows) {
-      // If has:image is active, make sure this message actually has an image attachment
+      // still keep the client-side image check for has:image
       if (hasImageFilter) {
         const atts = Array.isArray(m.attachments) ? m.attachments : [];
         const hasImg = atts.some(a => isImageLike(a || {}));
         if (!hasImg) continue;
       }
-
       wrap.append(messageRowWithHL(m, q));
       shown++;
     }
+
+    searchShownCount = shown;
+    searchOffset += rows.length; // move offset by *rows returned*, not shown
 
     document.getElementById('count').textContent =
       shown ? `(${shown.toLocaleString()} results)` : '(0 results)';
     document.getElementById('search-hint').textContent =
       shown ? '' : 'No matches.';
 
+    // Show or hide "Load more"
+    const moreWrap = document.getElementById('search-more');
+    if (rows.length === searchLimit) {
+      moreWrap.style.display = 'block';
+    } else {
+      moreWrap.style.display = 'none';
+    }
+
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   } catch (err) {
     console.error(err);
     banner('Search failed.', false);
     document.getElementById('search-hint').textContent = 'Search failed.';
+    document.getElementById('search-more').style.display = 'none';
   }
 }
 
+async function loadMoreSearch() {
+  if (!searchMode) return; // only valid while in search mode
 
+  document.getElementById('search-hint').textContent = 'Loading more…';
 
+  try {
+    const { ok, rows } = await fetchSearch(currentSearch, searchLimit, searchOffset);
+
+    const wrap = document.getElementById('messages');
+    let added = 0;
+
+    for (const m of rows) {
+      if (hasImageFilter) {
+        const atts = Array.isArray(m.attachments) ? m.attachments : [];
+        const hasImg = atts.some(a => isImageLike(a || {}));
+        if (!hasImg) continue;
+      }
+      wrap.append(messageRowWithHL(m, currentSearch));
+      added++;
+    }
+
+    searchShownCount += added;
+    searchOffset += rows.length;
+
+    document.getElementById('count').textContent =
+      searchShownCount ? `(${searchShownCount.toLocaleString()} results)` : '(0 results)';
+    document.getElementById('search-hint').textContent = '';
+
+    // If we got a full page, assume there's more; otherwise hide the button
+    const moreWrap = document.getElementById('search-more');
+    if (rows.length === searchLimit) {
+      moreWrap.style.display = 'block';
+    } else {
+      moreWrap.style.display = 'none';
+    }
+  } catch (err) {
+    console.error(err);
+    banner('Load more failed.', false);
+    document.getElementById('search-hint').textContent = 'Load more failed.';
+    document.getElementById('search-more').style.display = 'none';
+  }
+}
 
 /* -------- Gate/UI logic -------- */
 const gateEl = $('#gate');
@@ -1372,6 +1435,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (onPill) {
     onPill.addEventListener('click', () => {
       clearOnFilter(true);   // NEW
+    });
+  }
+
+  const moreBtn = document.getElementById('search-more-btn');
+  if (moreBtn) {
+    moreBtn.addEventListener('click', () => {
+      loadMoreSearch();
     });
   }
 
