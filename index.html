@@ -1287,7 +1287,7 @@ function gateNotLoggedIn() {
   });
 }
 
-/* Paywall gate (authed but not allowed) */
+  
 function gatePaywall(){
   gateTitle.textContent = 'Choose access';
   gateSub.textContent = 'Boosters are free. Otherwise subscribe for $5/month.';
@@ -1301,7 +1301,6 @@ function gatePaywall(){
     a.className='pill';
     a.innerHTML = `<h4>Boost the Server</h4><p>Active Nitro boosters get free access.</p>`;
 
-    // NEW: "I've Boosted" button that rechecks their booster status
     const aBtn = document.createElement('button');
     aBtn.type = 'button';
     aBtn.className = 'discord-login-btn';
@@ -1314,7 +1313,7 @@ function gatePaywall(){
     `;
     a.append(aBtn);
 
-    // Subscribe pill (unchanged)
+    // Subscribe pill
     const b = document.createElement('div'); 
     b.className='pill';
     b.innerHTML = `<h4>Subscribe</h4><p>Unlock the archive with a monthly sub.</p>`;
@@ -1328,9 +1327,41 @@ function gatePaywall(){
 
     row.append(a,b); 
     wrap.append(row);
+
+    // 🔹 Opt-out line
+    const opt = document.createElement('div');
+    opt.style.cssText = `
+      margin-top: 12px;
+      text-align: center;
+      font-size: 11px;
+      color: #8b8f98;
+      font-style: italic;
+    `;
+    opt.innerHTML = `
+      to opt-out of discordchats click
+      <span id="optout-link"
+            style="cursor:pointer; text-decoration:underline; font-weight:600;">
+        here
+      </span>
+    `;
+    wrap.append(opt);
+
+    const optLink = opt.querySelector('#optout-link');
+    optLink.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      if (!confirm('This will hide your messages from the archive for other viewers. Continue?')) {
+        return;
+      }
+      try {
+        await apiFetch('/optout', { method: 'POST' });
+        banner('You have opted out. Your messages will no longer be shown in the archive.', true);
+      } catch (e) {
+        console.error(e);
+        banner('Opt-out failed. Please try again.', false);
+      }
+    });
   });
 }
-
 
 async function paintGate(){  // legacy helper (not used by boot, but kept just in case)
   const status = await getGate();
