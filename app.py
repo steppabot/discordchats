@@ -379,6 +379,7 @@ async def messages(
 # ------------------------------
 # Full-archive search (earliest → latest)
 # ------------------------------
+
 @app.get("/api/search")
 async def search_messages(
     q: str = Query("", max_length=100, description="Search term (can be empty if user_id/mentioned_id set)"),
@@ -390,12 +391,14 @@ async def search_messages(
     on_date: Optional[str] = Query(None, description="Exact Date YYYY-MM-DD"),
 ):
     term = (q or "").strip()
+
+    # allow searches that are purely filters (from:, mentions:, has:image, on:)
     if not term and user_id is None and mentioned_id is None and not has_image and not on_date:
         raise HTTPException(status_code=400, detail="Need q, user_id, mentioned_id, has_image, or on_date")
 
     try:
         async with _pool.acquire() as conn:
-            params = []
+            params: list[Any] = []
             where_clauses: list[str] = []
 
             # text search
@@ -421,13 +424,13 @@ async def search_messages(
                 params.append(f"<@{mentioned_id}>")
                 params.append(f"<@!{mentioned_id}>")
 
-            # has:image filter
+            # require at least one attachment if has_image is set
             if has_image:
                 where_clauses.append(
                     "EXISTS (SELECT 1 FROM archived_attachments a2 WHERE a2.message_id = m.message_id)"
                 )
 
-            # on: YYYY-MM-DD filter
+            # on: YYYY-MM-DD date filter
             if on_date:
                 try:
                     d = Date.fromisoformat(on_date)
@@ -437,14 +440,15 @@ async def search_messages(
                 where_clauses.append(f"m.ts_local_date = ${idx}")
                 params.append(d)
 
-            # 👇 build base where_sql (default TRUE if no other filters)
-            where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+            # join all WHERE pieces; default to TRUE if somehow empty
+            where_sql = " AND ".join(where_clauses) or "TRUE"
 
-            # 👇 append opt-out condition
-            where_sql = f"""
-              {where_sql}
+            # always exclude opted-out users
+            where_sql += """
               AND NOT EXISTS (
-                SELECT 1 FROM opt_outs o WHERE o.discord_user_id = m.user_id
+                SELECT 1
+                FROM opt_outs o
+                WHERE o.discord_user_id = m.user_id
               )
             """
 
@@ -481,8 +485,10 @@ async def search_messages(
                 ORDER BY m.ts_utc DESC, m.channel_id DESC, m.message_id DESC
                 LIMIT ${len(params)+1} OFFSET ${len(params)+2}
             """
+
             params.extend([limit, offset])
             rows = await conn.fetch(sql, *params)
+
         out = []
         for rec in rows:
             r = dict(rec)
@@ -506,6 +512,7 @@ async def search_messages(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
 @app.get("/api/users")
 async def user_search(
     term: str = Query(..., min_length=1, max_length=50),
@@ -513,27 +520,27 @@ async def user_search(
 ):
     try:
         async with _pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT
-                    m.user_id,
-                    MAX(m.display_name) AS display_name,
-                    MAX(m.avatar_url)   AS avatar_url,
-                    COUNT(*)            AS messages
-                FROM archived_messages m
-                LEFT JOIN opt_outs o
-                  ON o.discord_user_id = m.user_id
-                WHERE o.discord_user_id IS NULL
-                  AND (
-                        m.display_name ILIKE '%' || $1 || '%'
-                     OR CAST(m.user_id AS TEXT) ILIKE '%' || $1 || '%'
-                  )
-                GROUP BY m.user_id
-                ORDER BY messages DESC
-                LIMIT $2
-                """,
-                term, limit
-            )
+        rows = await conn.fetch(
+            """
+            SELECT
+                m.user_id,
+                MAX(m.display_name) AS display_name,
+                MAX(m.avatar_url)   AS avatar_url,
+                COUNT(*)            AS messages
+            FROM archived_messages m
+            LEFT JOIN opt_outs o
+              ON o.discord_user_id = m.user_id
+            WHERE o.discord_user_id IS NULL
+              AND (
+                m.display_name ILIKE '%' || $1 || '%'
+                OR CAST(m.user_id AS TEXT) ILIKE '%' || $1 || '%'
+              )
+            GROUP BY m.user_id
+            ORDER BY messages DESC
+            LIMIT $2
+            """,
+            term, limit
+        )
         return [
             {
                 "user_id": str(r["user_id"]),
