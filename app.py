@@ -520,27 +520,29 @@ async def user_search(
 ):
     try:
         async with _pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT
-                m.user_id,
-                MAX(m.display_name) AS display_name,
-                MAX(m.avatar_url)   AS avatar_url,
-                COUNT(*)            AS messages
-            FROM archived_messages m
-            LEFT JOIN opt_outs o
-              ON o.discord_user_id = m.user_id
-            WHERE o.discord_user_id IS NULL
-              AND (
-                m.display_name ILIKE '%' || $1 || '%'
-                OR CAST(m.user_id AS TEXT) ILIKE '%' || $1 || '%'
-              )
-            GROUP BY m.user_id
-            ORDER BY messages DESC
-            LIMIT $2
-            """,
-            term, limit
-        )
+            rows = await conn.fetch(
+                """
+                SELECT
+                    m.user_id,
+                    MAX(m.display_name) AS display_name,
+                    MAX(m.avatar_url)   AS avatar_url,
+                    COUNT(*)            AS messages
+                FROM archived_messages m
+                LEFT JOIN opt_outs o
+                  ON o.discord_user_id = m.user_id
+                WHERE o.discord_user_id IS NULL
+                  AND (
+                    m.display_name ILIKE '%' || $1 || '%'
+                    OR CAST(m.user_id AS TEXT) ILIKE '%' || $1 || '%'
+                  )
+                GROUP BY m.user_id
+                ORDER BY messages DESC
+                LIMIT $2
+                """,
+                term,
+                limit,
+            )
+
         return [
             {
                 "user_id": str(r["user_id"]),
@@ -553,6 +555,7 @@ async def user_search(
     except Exception as e:
         log.exception("/api/users failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # ============================
 # Auth / Gate / Billing
