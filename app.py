@@ -390,14 +390,13 @@ async def search_messages(
     on_date: Optional[str] = Query(None, description="Exact Date YYYY-MM-DD"),
 ):
     term = (q or "").strip()
-    # allow searches that are purely "has:image"
     if not term and user_id is None and mentioned_id is None and not has_image and not on_date:
         raise HTTPException(status_code=400, detail="Need q, user_id, mentioned_id, has_image, or on_date")
 
     try:
         async with _pool.acquire() as conn:
             params = []
-            where_clauses = []
+            where_clauses: list[str] = []
 
             # text search
             if term:
@@ -422,12 +421,13 @@ async def search_messages(
                 params.append(f"<@{mentioned_id}>")
                 params.append(f"<@!{mentioned_id}>")
 
-            # NEW: require at least one attachment if has_image is set
+            # has:image filter
             if has_image:
                 where_clauses.append(
                     "EXISTS (SELECT 1 FROM archived_attachments a2 WHERE a2.message_id = m.message_id)"
                 )
-            # on: YYYY-MM-DD date filter
+
+            # on: YYYY-MM-DD filter
             if on_date:
                 try:
                     d = Date.fromisoformat(on_date)
@@ -437,11 +437,17 @@ async def search_messages(
                 where_clauses.append(f"m.ts_local_date = ${idx}")
                 params.append(d)
 
-            where_sql = f"""{where_sql}
+            # 👇 build base where_sql (default TRUE if no other filters)
+            where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+
+            # 👇 append opt-out condition
+            where_sql = f"""
+              {where_sql}
               AND NOT EXISTS (
                 SELECT 1 FROM opt_outs o WHERE o.discord_user_id = m.user_id
               )
             """
+
             sql = f"""
                 SELECT
                     m.message_id,
@@ -505,23 +511,24 @@ async def user_search(
     term: str = Query(..., min_length=1, max_length=50),
     limit: int = Query(20, ge=1, le=50),
 ):
-    """
-    Fuzzy search for users by display_name (and optionally ID).
-    Used for the `from:` autocomplete.
-    """
     try:
         async with _pool.acquire() as conn:
             rows = await conn.fetch(
                 """
                 SELECT
-                    user_id,
-                    MAX(display_name) AS display_name,
-                    MAX(avatar_url)   AS avatar_url,
-                    COUNT(*)          AS messages
-                FROM archived_messages
-                WHERE display_name ILIKE '%' || $1 || '%'
-                   OR CAST(user_id AS TEXT) ILIKE '%' || $1 || '%'
-                GROUP BY user_id
+                    m.user_id,
+                    MAX(m.display_name) AS display_name,
+                    MAX(m.avatar_url)   AS avatar_url,
+                    COUNT(*)            AS messages
+                FROM archived_messages m
+                LEFT JOIN opt_outs o
+                  ON o.discord_user_id = m.user_id
+                WHERE o.discord_user_id IS NULL
+                  AND (
+                        m.display_name ILIKE '%' || $1 || '%'
+                     OR CAST(m.user_id AS TEXT) ILIKE '%' || $1 || '%'
+                  )
+                GROUP BY m.user_id
                 ORDER BY messages DESC
                 LIMIT $2
                 """,
