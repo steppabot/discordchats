@@ -226,6 +226,13 @@ async def _startup():
         );
         """)
 
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS opt_outs (
+          discord_user_id BIGINT PRIMARY KEY,
+          created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """)
+
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_status ON subscriptions(status);")
 
 # ------------------------------
@@ -257,10 +264,13 @@ async def dates():
     try:
         async with _pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT ts_local_date AS d, COUNT(*) AS n
-                FROM archived_messages
-                GROUP BY ts_local_date
-                ORDER BY ts_local_date ASC
+                SELECT m.ts_local_date AS d, COUNT(*) AS n
+                FROM archived_messages m
+                LEFT JOIN opt_outs o
+                  ON o.discord_user_id = m.user_id
+                WHERE o.discord_user_id IS NULL
+                GROUP BY m.ts_local_date
+                ORDER BY m.ts_local_date ASC
             """)
         return [{"date": str(r["d"]), "count": r["n"]} for r in rows]
     except Exception as e:
@@ -311,6 +321,9 @@ async def messages(
                     LEFT JOIN archived_attachments a
                       ON a.message_id = m.message_id
                     WHERE m.ts_local_date = $1
+                      AND NOT EXISTS (
+                        SELECT 1 FROM opt_outs o WHERE o.discord_user_id = m.user_id
+                      )
                     GROUP BY m.message_id
                     ORDER BY m.ts_utc ASC, m.channel_id ASC, m.message_id ASC
                     LIMIT $2 OFFSET $3
@@ -333,6 +346,9 @@ async def messages(
                         m.content
                     FROM archived_messages m
                     WHERE m.ts_local_date = $1
+                      AND NOT EXISTS (
+                        SELECT 1 FROM opt_outs o WHERE o.discord_user_id = m.user_id
+                      )
                     ORDER BY m.ts_utc ASC, m.channel_id ASC, m.message_id ASC
                     LIMIT $2 OFFSET $3 
                     """,
@@ -421,8 +437,11 @@ async def search_messages(
                 where_clauses.append(f"m.ts_local_date = ${idx}")
                 params.append(d)
 
-            where_sql = " AND ".join(where_clauses) or "TRUE"
-
+            where_sql = f"""{where_sql}
+              AND NOT EXISTS (
+                SELECT 1 FROM opt_outs o WHERE o.discord_user_id = m.user_id
+              )
+            """
             sql = f"""
                 SELECT
                     m.message_id,
@@ -529,6 +548,7 @@ gate_router = APIRouter(prefix="/api/gate", tags=["gate"])
 pay_router  = APIRouter(prefix="/api/pay", tags=["pay"])
 me_router   = APIRouter(prefix="/api/me", tags=["me"])
 mentions_router = APIRouter(prefix="/api/mentions", tags=["mentions"])
+optout_router = APIRouter(prefix="/api/optout", tags=["optout"])
 
 # --- Simple signed cookie session (HMAC) ---
 def _sign(v: str) -> str:
@@ -823,6 +843,23 @@ async def gate_status(request: Request, debug: bool = Query(False)):
 
     return payload
 
+# --------- Opt Out  ----------
+@optout_router.post("")
+async def opt_out(request: Request):
+    duid = _session_user(request)
+    if not duid:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    await _db_execute(
+        """
+        INSERT INTO opt_outs (discord_user_id)
+        VALUES ($1)
+        ON CONFLICT (discord_user_id) DO NOTHING
+        """,
+        duid,
+    )
+    return {"ok": True, "opted_out": True}
+
 # --------- Me / Profile ----------
 @me_router.get("")
 async def me(request: Request):
@@ -943,4 +980,5 @@ app.include_router(auth_router)
 app.include_router(gate_router)
 app.include_router(pay_router)
 app.include_router(me_router)
-app.include_router(mentions_router)   # ← add this line
+app.include_router(mentions_router)
+app.include_router(optout_router)
