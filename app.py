@@ -44,6 +44,9 @@ SITE_BASE_URL         = os.getenv("SITE_BASE_URL")
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "dc_sid")
 SESSION_SECRET      = (os.getenv("SESSION_SECRET") or "dev_dev_dev").encode("utf-8")
 
+# Always exclude this Discord user ID (your ID) from archive results via opt_outs
+OWNER_DISCORD_ID = 568583831985061918
+
 log = logging.getLogger("uvicorn.error")
 
 # S3 client is optional—only if creds/endpoint provided
@@ -232,6 +235,13 @@ async def _startup():
           created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """)
+
+        # Always auto-opt-out the owner account so their messages never appear
+        await conn.execute("""
+            INSERT INTO opt_outs (discord_user_id)
+            VALUES ($1)
+            ON CONFLICT (discord_user_id) DO NOTHING
+        """, OWNER_DISCORD_ID)
 
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_status ON subscriptions(status);")
 
