@@ -1,0 +1,160 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Helicopter — Wolfpac Arcade</title><style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#202225;color:#e5e7eb;font:14px system-ui,sans-serif;display:grid;place-items:center;padding:16px}.game{width:min(100%,1100px);border:1px solid #141517;border-radius:10px;overflow:hidden;background:#070b09}.bar,.bottom{display:flex;align-items:center;justify-content:space-between;background:#2f3136;padding:14px 18px;gap:12px}.bar strong{font-size:13px;letter-spacing:1px}.stats{display:flex;gap:20px;font-size:11px;color:#a3a6aa}.stats b{color:#b9f77d;margin-left:5px;font-variant-numeric:tabular-nums}.stage{position:relative;aspect-ratio:16/9}.stage:focus-visible{outline:2px solid #b9f77d;outline-offset:-2px}canvas{width:100%;height:100%;display:block;touch-action:none}.overlay{position:absolute;inset:0;background:#02070470;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;backdrop-filter:blur(1px)}.overlay[hidden]{display:none}.overlay small{letter-spacing:3px;color:#b9f77d;font-size:10px}.overlay h1{font-size:clamp(30px,7vw,65px);letter-spacing:3px;margin:10px 0}.overlay p{color:#ccd9ca;font-size:12px;line-height:1.6;margin:0 0 22px}button{font:inherit;cursor:pointer;border:1px solid #40444b;border-radius:6px;padding:8px 12px;color:#e5e7eb;background:#202225}button:focus-visible{outline:2px solid #b9f77d;outline-offset:3px}#play{background:#b9f77d;color:#172113;padding:13px 28px;font-weight:700;border:0}.bottom{font-size:11px;color:#a3a6aa}.actions{display:flex;gap:5px}kbd{color:#e5e7eb;background:#202225;border:1px solid #40444b;border-radius:4px;padding:3px 6px;font:10px system-ui}.game:fullscreen{display:flex;flex-direction:column;justify-content:center}.game:fullscreen .stage{flex:1;aspect-ratio:auto;min-height:0}.game:fullscreen canvas{object-fit:contain}@media(max-width:550px){body{padding:0}.game{border:0;border-radius:0}.bar,.bottom{padding:11px}.stats{gap:10px}.overlay p{font-size:10px;margin-bottom:13px}.overlay small{font-size:8px}#play{padding:10px 22px}.bottom{font-size:9px}}
+</style></head><body><main class="game" id="game"><div class="bar"><strong>HELICOPTER</strong><div class="stats"><span>DISTANCE <b id="score">0</b></span><span>BEST <b id="best">0</b></span></div></div><div class="stage" id="stage" tabindex="0" aria-label="Helicopter game. Hold Space or touch to rise, release to fall. P pauses."><canvas id="canvas" aria-label="Helicopter cave game"></canvas><div class="overlay" id="overlay"><small>WOLFPAC ARCADE</small><h1 id="title">HELICOPTER</h1><p id="description">Hold to rise. Release to fall.<br>Keep clear of the cave and obstacles.</p><button id="play">Play now →</button></div></div><div class="bottom"><span><kbd>SPACE</kbd> / <kbd>HOLD / TOUCH</kbd> to rise · release to fall</span><div class="actions"><button id="pause" aria-label="Pause or resume">Ⅱ</button><button id="sound" aria-label="Toggle sound" aria-pressed="false">♪</button><button id="fullscreen" aria-label="Fullscreen">⛶</button></div></div></main><script type="module">
+// Original canvas artwork and deterministic-time flight mechanics.
+const WIDTH = 960, HEIGHT = 540;
+function terrain(x, distance = 0) {
+  const squeeze = Math.min(distance / 160, 30);
+  return { top: Math.round((59 + Math.sin(x / 250) * 17 + Math.sin(x / 83) * 6 + squeeze) / 6) * 6,
+    bottom: Math.round((465 + Math.sin(x / 290 + 1.3) * 22 + Math.sin(x / 105) * 9 - squeeze) / 6) * 6 };
+}
+function circleRect(x,y,r,rect) {
+  const dx=x-Math.max(rect.x,Math.min(x,rect.x+rect.w));
+  const dy=y-Math.max(rect.y,Math.min(y,rect.y+rect.h));
+  return dx*dx+dy*dy < r*r;
+}
+class FlightModel {
+  constructor(random=Math.random) { this.random=random; this.reset(); }
+  reset() { this.x=180;this.y=260;this.vy=0;this.travel=0;this.distance=0;this.time=0;this.dead=false;this.obstacles=[];this.nextObstacle=1050; }
+  update(dt,thrust) {
+    if(this.dead)return;
+    dt=Math.min(dt,1/60);this.time+=dt;
+    this.vy=Math.max(-265,Math.min(285,this.vy+(thrust?-600:440)*dt));
+    this.y+=this.vy*dt;this.travel+=(185+Math.min(this.distance/12,100))*dt;
+    this.distance=Math.floor(this.travel/10);
+    while(this.nextObstacle < this.travel+WIDTH+50) {
+      const t=terrain(this.nextObstacle,this.distance), h=90+this.random()*36;
+      const k=this.random();
+      this.obstacles.push({x:this.nextObstacle,w:35,h,y:k<.4?t.top:k<.8?t.bottom-h:t.top+90+this.random()*70});
+      this.nextObstacle+=370+this.random()*145;
+    }
+    this.obstacles=this.obstacles.filter(o=>o.x+o.w>this.travel-80);
+    const t=terrain(this.x+this.travel,this.distance);
+    if(this.y-13<t.top || this.y+13>t.bottom)this.dead=true;
+    for(const o of this.obstacles)if(circleRect(this.x,this.y,17,{...o,x:o.x-this.travel}))this.dead=true;
+  }
+}
+class HelicopterGame {
+  constructor(canvas,onChange=()=>{}) {
+    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.model=new FlightModel();this.onChange=onChange;
+    this.state='ready';this.held=false;this.particles=[];this.last=0;this.acc=0;this.sound=false;this.audio=null;this.explosion=null;
+    this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches??false;
+    this.best=0;try{this.best=Number(localStorage.getItem('arcade-helicopter-best'))||0;}catch{}
+    canvas.width=WIDTH;canvas.height=HEIGHT;
+    this.frame=this.frame.bind(this);this.raf=requestAnimationFrame(this.frame);this.notify();
+  }
+  notify(){this.onChange({state:this.state,distance:this.model.distance,best:this.best});}
+  start(){this.model.reset();this.particles=[];this.explosion=null;this.state='playing';this.acc=0;this.held=false;this.notify();}
+  pause(){if(this.state==='playing'){this.state='paused';this.held=false;this.notify();}}
+  resume(){if(this.state==='paused'){this.state='playing';this.acc=0;this.notify();}}
+  crash(){
+    if(this.state!=='playing')return;
+    this.state='exploding';this.held=false;this.acc=0;
+    const particles=[];
+    for(const [kind,count] of [['fire',15],['spark',30],['debris',11],['smoke',14]]){
+      for(let i=0;i<count;i++){
+        const angle=Math.random()*Math.PI*2,speed=kind==='spark'?140+Math.random()*340:kind==='debris'?90+Math.random()*210:30+Math.random()*100;
+        particles.push({kind,x:(Math.random()-.5)*16,y:(Math.random()-.5)*12,
+          vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed-(kind==='smoke'?55:0),
+          life:kind==='fire'?.28+Math.random()*.25:kind==='smoke'?.9+Math.random()*.45:.55+Math.random()*.55,
+          size:kind==='fire'?8+Math.random()*13:kind==='smoke'?11+Math.random()*15:kind==='debris'?3+Math.random()*5:1+Math.random()*2,
+          spin:(Math.random()-.5)*20,angle,shade:Math.random()});
+      }
+    }
+    this.explosion={x:this.model.x,y:this.model.y,age:0,duration:1.35,particles};
+    this.best=Math.max(this.best,this.model.distance);try{localStorage.setItem('arcade-helicopter-best',String(this.best));}catch{}
+    this.beep(55,.3);this.notify();
+  }
+  updateExplosion(dt){
+    const e=this.explosion;if(!e)return;e.age+=dt;
+    for(const p of e.particles){
+      const drag=Math.exp(-(p.kind==='smoke'?1.3:2.2)*dt);
+      p.vx*=drag;p.vy*=drag;p.vy+=(p.kind==='debris'?350:p.kind==='spark'?150:p.kind==='smoke'?-45:-20)*dt;
+      p.x+=p.vx*dt;p.y+=p.vy*dt;p.angle+=p.spin*dt;
+    }
+    if(e.age>=e.duration){this.state='over';this.notify();}
+  }
+  beep(freq,duration){if(!this.sound)return;try{this.audio??=new (window.AudioContext||window.webkitAudioContext)();this.audio.resume();const o=this.audio.createOscillator(),g=this.audio.createGain();o.type='triangle';o.frequency.value=freq;o.connect(g);g.connect(this.audio.destination);g.gain.setValueAtTime(.045,this.audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,this.audio.currentTime+duration);o.start();o.stop(this.audio.currentTime+duration);}catch{}}
+  frame(now){const dt=this.last?Math.min((now-this.last)/1000,.05):0;this.last=now;
+    if(this.state==='playing'){
+      this.acc+=dt;while(this.acc>=1/120){this.model.update(1/120,this.held);this.acc-=1/120;if(this.model.dead){this.crash();break;}}
+      if(this.state==='playing'&&Math.random()<.8)this.particles.push({x:this.model.x-29,y:this.model.y+4,life:1});
+      for(const p of this.particles){p.x-=dt*190;p.life-=dt*.85;p.y+=dt*9;}
+      this.particles=this.particles.filter(p=>p.life>0);this.notify();
+    }else if(this.state==='exploding')this.updateExplosion(dt);
+    this.draw(now/1000);this.raf=requestAnimationFrame(this.frame);
+  }
+  draw(time){const c=this.ctx,m=this.model;c.fillStyle='#070b09';c.fillRect(0,0,WIDTH,HEIGHT);c.save();
+    if(this.state==='exploding'&&!this.reducedMotion){const force=7*Math.pow(Math.max(0,1-this.explosion.age/.3),2);c.translate(Math.sin(time*173)*force,Math.cos(time*139)*force);}
+    // Faint depth grid sits behind the intentionally simple neon cave.
+    c.strokeStyle='#0c1b10';c.lineWidth=1;for(let x=-(m.travel*.25)%60;x<WIDTH;x+=60){c.beginPath();c.moveTo(x,0);c.lineTo(x,HEIGHT);c.stroke();}
+    for(let y=0;y<HEIGHT;y+=60){c.beginPath();c.moveTo(0,y);c.lineTo(WIDTH,y);c.stroke();}
+    c.fillStyle='#67f466';
+    for(let x=0;x<WIDTH;x+=8){const t=terrain(x+m.travel,m.distance);c.fillRect(x,0,9,t.top);c.fillRect(x,t.bottom,9,HEIGHT-t.bottom);}
+    for(const o of m.obstacles)c.fillRect(Math.round(o.x-m.travel),o.y,o.w,o.h);
+    c.save();c.globalCompositeOperation='source-atop';c.fillStyle='rgba(0,20,0,.20)';
+    // Horizontal engraving on the cave blocks, as in the reference.
+    for(let x=0;x<WIDTH;x+=8){const t=terrain(x+m.travel,m.distance);for(let y=5;y<t.top;y+=8)c.fillRect(x,y,8,1);for(let y=Math.ceil(t.bottom/8)*8;y<HEIGHT;y+=8)c.fillRect(x,y,8,1);}
+    for(const o of m.obstacles)for(let y=o.y+5;y<o.y+o.h;y+=8)c.fillRect(o.x-m.travel,y,o.w,1);
+    c.restore();
+    for(const p of this.particles){c.fillStyle=`rgba(165,184,175,${p.life*.45})`;c.beginPath();c.arc(p.x,p.y,3+(1-p.life)*4,0,Math.PI*2);c.fill();}
+    if(this.state!=='exploding'&&this.state!=='over'){
+    c.save();c.translate(m.x,m.y);c.rotate(Math.max(-.14,Math.min(.19,m.vy/1400)));
+    c.fillStyle='#7fa3bc';c.beginPath();c.moveTo(-19,0);c.lineTo(-43,-7);c.lineTo(-45,5);c.lineTo(-18,7);c.fill();
+    c.fillStyle='#cce5f2';c.beginPath();c.ellipse(0,3,28,13,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#5ab4d9';c.beginPath();c.ellipse(13,-1,11,9,-.2,-1.5,1.5);c.fill();
+    c.strokeStyle='#7595b2';c.lineWidth=3;c.beginPath();c.moveTo(-9,-4);c.lineTo(-9,12);c.moveTo(3,-6);c.lineTo(3,13);c.stroke();
+    c.strokeStyle='#a4b8c4';c.lineWidth=2;c.beginPath();c.moveTo(-13,14);c.lineTo(-15,20);c.lineTo(20,20);c.lineTo(24,17);c.moveTo(8,14);c.lineTo(10,20);c.moveTo(-2,-10);c.lineTo(-2,-20);c.stroke();
+    const rotor=(this.state==='playing'?Math.sin(time*75):.75);c.strokeStyle='#70a7cf';c.lineWidth=3;c.beginPath();c.moveTo(-39*rotor,-20);c.lineTo(39*rotor,-20);c.stroke();
+    c.restore();}
+    if(this.explosion)this.drawExplosion();
+    c.fillStyle='rgba(2,5,3,.10)';for(let y=0;y<HEIGHT;y+=4)c.fillRect(0,y,WIDTH,1);c.restore();
+  }
+  drawExplosion(){
+    const c=this.ctx,e=this.explosion,t=e.age;c.save();c.translate(e.x,e.y);
+    // Smoke expands behind the hot burst; metal fragments tumble through it.
+    for(const p of e.particles){
+      if(p.kind!=='smoke'||t>=p.life)continue;
+      const q=t/p.life;c.globalAlpha=Math.min(1,t*9)*(1-q)*.6;
+      c.fillStyle=p.shade>.5?'#616363':'#343b3b';c.beginPath();c.arc(p.x,p.y,p.size*(.45+q*1.65),0,Math.PI*2);c.fill();
+    }
+    c.globalAlpha=1;
+    if(t<.5){
+      const fade=1-t/.5,radius=35+t*130,glow=c.createRadialGradient(0,0,0,0,0,radius);
+      glow.addColorStop(0,`rgba(255,242,160,${fade*.8})`);glow.addColorStop(.35,`rgba(255,118,25,${fade*.7})`);glow.addColorStop(1,'rgba(255,60,0,0)');
+      c.fillStyle=glow;c.fillRect(-radius,-radius,radius*2,radius*2);
+    }
+    for(const p of e.particles){
+      if(p.kind==='smoke'||t>=p.life)continue;const q=t/p.life;c.save();c.translate(p.x,p.y);
+      c.globalAlpha=Math.min(1,(1-q)*2);
+      if(p.kind==='debris'){
+        c.rotate(p.angle);c.fillStyle=p.shade>.5?'#cce5f2':'#5b93b5';c.fillRect(-p.size,-p.size/3,p.size*2,p.size*.65);
+      }else if(p.kind==='spark'){
+        c.strokeStyle=p.shade>.5?'#fff0a3':'#ff9c38';c.lineWidth=p.size*(1-q*.6);c.lineCap='round';c.beginPath();c.moveTo(0,0);c.lineTo(-p.vx*.035,-p.vy*.035);c.stroke();
+      }else{
+        const r=p.size*(.6+Math.sin(q*Math.PI)*.9);c.fillStyle=q<.3?'#fff2b0':q<.65?'#ffb137':'#f06421';c.beginPath();c.arc(0,0,r,0,Math.PI*2);c.fill();
+      }c.restore();
+    }
+    if(t<.34){c.globalAlpha=(1-t/.34)*.75;c.strokeStyle='#ffcc73';c.lineWidth=3*(1-t/.34)+.5;c.beginPath();c.arc(0,0,10+t*235,0,Math.PI*2);c.stroke();}
+    // A single localized impact flash, never a repeating full-screen strobe.
+    if(t<.13){c.globalAlpha=1-t/.13;c.fillStyle='#fff7d7';c.beginPath();c.arc(0,0,22+t*80,0,Math.PI*2);c.fill();}
+    c.restore();
+  }
+}
+
+const $=id=>document.getElementById(id),stage=$('stage');let lastState='',lastScore=-1,lastBest=-1;
+const game=new HelicopterGame($('canvas'),({state,distance,best})=>{
+ if(distance!==lastScore){$('score').textContent=distance;lastScore=distance;}if(best!==lastBest){$('best').textContent=best;lastBest=best;}
+ if(state===lastState)return;lastState=state;$('overlay').hidden=state==='playing'||state==='exploding';$('pause').textContent=state==='paused'?'▷':'Ⅱ';
+ if(state==='paused'){$('title').textContent='PAUSED';$('description').textContent='Your flight is waiting right here.';$('play').textContent='Resume →';}
+ if(state==='over'){$('title').textContent='FLIGHT OVER';$('description').textContent=`${distance} meters. Best: ${best} meters.`;$('play').textContent='Fly again →';}
+});
+function toggle(){game.state==='paused'?game.resume():game.pause();}
+$('play').onclick=()=>{game.state==='paused'?game.resume():game.start();stage.focus({preventScroll:true});};$('pause').onclick=toggle;
+stage.addEventListener('pointerdown',e=>{if(e.target.closest('button'))return;if(game.state==='playing'){game.held=true;stage.focus({preventScroll:true});stage.setPointerCapture(e.pointerId);e.preventDefault();}});
+for(const event of ['pointerup','pointercancel','lostpointercapture'])stage.addEventListener(event,()=>game.held=false);
+document.addEventListener('keydown',e=>{if(e.target.closest('input,textarea,button,a,[contenteditable]'))return;if(['Space','ArrowUp'].includes(e.code)){e.preventDefault();if(!e.repeat){if(game.state==='ready'||game.state==='over')game.start();else if(game.state==='paused')game.resume();}game.held=game.state==='playing';}if(e.code==='KeyP'&&!e.repeat)toggle();});
+document.addEventListener('keyup',e=>{if(['Space','ArrowUp'].includes(e.code))game.held=false;});window.addEventListener('blur',()=>game.pause());document.addEventListener('visibilitychange',()=>{if(document.hidden)game.pause();});
+$('sound').onclick=()=>{game.sound=!game.sound;$('sound').setAttribute('aria-pressed',game.sound);$('sound').style.color=game.sound?'#b9f77d':'';game.beep(440,.1);};
+$('fullscreen').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await $('game').requestFullscreen?.();}catch{}};
+</script></body></html>
