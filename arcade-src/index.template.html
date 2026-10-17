@@ -26,7 +26,7 @@ function notice(text){$('notice').textContent=text;$('notice').hidden=false;clea
 const game=new HelicopterGame($('gameCanvas'),({state,distance,best})=>{
   if(distance!==lastScore){$('distance').textContent=String(distance).padStart(4,'0');lastScore=distance;}
   if(best!==lastBest){$('best').textContent=String(best).padStart(4,'0');$('personalBest').replaceChildren(document.createTextNode(String(best)+' '));const unit=document.createElement('small');unit.textContent='m';$('personalBest').append(unit);lastBest=best;}
-  if(state===previousState)return;previousState=state;$('overlay').hidden=state==='playing';$('pause').textContent=state==='paused'?'▷':'Ⅱ';
+  if(state===previousState)return;previousState=state;$('overlay').hidden=state==='playing'||state==='exploding';$('pause').textContent=state==='paused'?'▷':'Ⅱ';
   const labels={ready:['A CLASSIC. ONE MORE FLIGHT.','HELICOPTER','Hold to rise. Release to fall. How far can you fly?','Play now →'],paused:['TAKE A BREATHER','PAUSED','Your flight is waiting right here.','Resume →'],over:['THERE’S ALWAYS ANOTHER FLIGHT','FLIGHT OVER',`${distance} meters. ${distance===best?'That’s your best distance!':'Ready to go a little further?'}`,'Fly again →']};
   if(labels[state]){const a=labels[state];$('overlayEyebrow').textContent=a[0];$('overlayTitle').textContent=a[1];$('overlayDescription').textContent=a[2];$('play').textContent=a[3];}
 });

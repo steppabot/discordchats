@@ -5,7 +5,7 @@
 const $=id=>document.getElementById(id),stage=$('stage');let lastState='',lastScore=-1,lastBest=-1;
 const game=new HelicopterGame($('canvas'),({state,distance,best})=>{
  if(distance!==lastScore){$('score').textContent=distance;lastScore=distance;}if(best!==lastBest){$('best').textContent=best;lastBest=best;}
- if(state===lastState)return;lastState=state;$('overlay').hidden=state==='playing';$('pause').textContent=state==='paused'?'▷':'Ⅱ';
+ if(state===lastState)return;lastState=state;$('overlay').hidden=state==='playing'||state==='exploding';$('pause').textContent=state==='paused'?'▷':'Ⅱ';
  if(state==='paused'){$('title').textContent='PAUSED';$('description').textContent='Your flight is waiting right here.';$('play').textContent='Resume →';}
  if(state==='over'){$('title').textContent='FLIGHT OVER';$('description').textContent=`${distance} meters. Best: ${best} meters.`;$('play').textContent='Fly again →';}
 });

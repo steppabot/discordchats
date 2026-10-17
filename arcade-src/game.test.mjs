@@ -16,9 +16,14 @@ test('obstacles collide and fixed step conserves distance across frame rates',()
 });
 test('renderer, state transitions, pause, restart and persistence run',()=>{
  globalThis.requestAnimationFrame=()=>1;globalThis.localStorage={getItem:()=> '24',setItem:()=>{}};
- const context=new Proxy({},{get:(obj,key)=>obj[key]??(()=>{}),set:(obj,key,value)=>(obj[key]=value,true)});
+ const context=new Proxy({createRadialGradient:()=>({addColorStop:()=>{}})},{get:(obj,key)=>obj[key]??(()=>{}),set:(obj,key,value)=>(obj[key]=value,true)});
  const game=new HelicopterGame({getContext:()=>context});assert.equal(game.best,24);game.start();game.held=true;
- for(let i=0;i<20;i++)game.frame(1000+i*16.67);game.pause();const travel=game.model.travel;game.frame(2000);assert.equal(game.model.travel,travel);game.resume();game.frame(2017);assert.ok(game.model.travel>travel);game.crash();assert.equal(game.state,'over');game.start();assert.equal(game.model.distance,0);
+ for(let i=0;i<20;i++)game.frame(1000+i*16.67);game.pause();const travel=game.model.travel;game.frame(2000);assert.equal(game.model.travel,travel);game.resume();game.frame(2017);assert.ok(game.model.travel>travel);
+ game.crash();assert.equal(game.state,'exploding');const crashDistance=game.model.distance,burst=game.explosion;
+ game.crash();assert.equal(game.explosion,burst,'a collision creates only one burst');
+ for(let i=1;i<=60;i++)game.frame(2017+i*16.67);assert.equal(game.state,'exploding','retry waits for the effect');assert.equal(game.model.distance,crashDistance);
+ for(let i=61;i<=90;i++)game.frame(2017+i*16.67);assert.equal(game.state,'over');
+ game.start();assert.equal(game.model.distance,0);assert.equal(game.explosion,null);
 });
 test('both standalone pages contain parseable scripts and no missing referenced IDs',async()=>{
  for(const path of ['../arcade.html','../games/helicopter.html']){
