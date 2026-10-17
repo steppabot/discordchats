@@ -1,12 +1,13 @@
 """Wolfpac arcade: permission-checked live chat using the existing site login.
 
-Only ARCADE_CHANNEL_IDS in DISCORD_GUILD_ID are exposed. Browser sends are
-attributed bot messages, never user-account automation. No archive writes.
+Only ARCADE_CHANNEL_IDS in DISCORD_GUILD_ID are exposed. Browser sends use
+webhook identity overrides derived from the authenticated server member. No archive writes.
 """
 import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import re
 import time
 from datetime import datetime, timezone, date
@@ -16,8 +17,13 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
+# Webhook tokens live in URL paths: do not emit HTTP client request URLs.
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('httpcore').setLevel(logging.WARNING)
+
 VIEW, SEND, HISTORY, ADMIN = 1024, 2048, 65536, 8
 MANAGE_CHANNELS, MANAGE_MESSAGES, BYPASS_SLOWMODE = 16, 8192, 1 << 52
+
 
 def permission_bits(member, guild, roles, channel):
     """Discord's everyone -> aggregated roles -> member overwrite order."""
@@ -89,6 +95,8 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
     relay_secret = settings.get('relay_secret', '')
     blocked_until = 0.0
     cache_lock = asyncio.Lock()
+    hooks = {}
+    hook_lock = asyncio.Lock()
 
     def require_config():
         if not configured:
@@ -107,20 +115,24 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
         if count >= maximum:
             raise HTTPException(429, 'Please wait before trying again.', headers={'Retry-After': str(max(1, int(until - now) + 1))})
 
-    async def discord(path, *, method='GET', payload=None):
+    async def discord(path, *, method='GET', payload=None, webhook=False):
         nonlocal blocked_until
         if blocked_until > time.monotonic():
             raise HTTPException(429, 'Discord is rate limiting chat.', headers={'Retry-After': str(int(blocked_until - time.monotonic()) + 1)})
         try:
             async with httpx.AsyncClient(timeout=10.0, transport=transport) as client:
                 result = await client.request(method, 'https://discord.com/api/v10' + path,
-                                              headers={'Authorization': f'Bot {bot_token}'}, json=payload)
+                                              headers={} if webhook else {'Authorization': f'Bot {bot_token}'}, json=payload)
         except httpx.HTTPError:
             raise HTTPException(502, 'Discord is temporarily unavailable.') from None
         if result.status_code == 429:
             retry = max(1.0, float(result.json().get('retry_after', 5)))
             blocked_until = time.monotonic() + retry
             raise HTTPException(429, 'Discord is rate limiting chat.', headers={'Retry-After': str(int(retry) + 1)})
+        if webhook and result.status_code == 404:
+            raise HTTPException(410, 'Arcade webhook was deleted.')
+        if result.status_code == 403 and '/webhooks' in path:
+            raise HTTPException(503, 'The server bot needs Manage Webhooks in this channel.')
         if result.status_code == 404 and '/members/' in path:
             raise HTTPException(403, 'You must be a current member of this Discord server.')
         if not result.is_success:
@@ -136,6 +148,48 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
             value = await discord(path)
             cache[path] = (time.monotonic() + 5, value)
             return value
+
+    async def channel_hook(channel_id):
+        async with hook_lock:
+            if channel_id in hooks:
+                return hooks[channel_id]
+            bot = await cached('/users/@me')
+            existing = await discord(f'/channels/{channel_id}/webhooks')
+            hook = next((h for h in existing if h.get('type') == 1
+                         and h.get('name') == 'Arcade Chat'
+                         and str((h.get('user') or {}).get('id')) == str(bot['id'])
+                         and h.get('token')), None)
+            if hook is None:
+                hook = await discord(f'/channels/{channel_id}/webhooks', method='POST', payload={'name': 'Arcade Chat'})
+            if not hook.get('token') or not str(hook.get('id', '')).isdigit():
+                raise HTTPException(503, 'Unable to initialize arcade webhook.')
+            hooks[channel_id] = hook
+            return hook
+
+    async def webhook_send(channel_id, member, content):
+        user = member['user']
+        name = public_user(member)['name']
+        name = re.sub(r'[\x00-\x1f\x7f]', '', name).strip()[:80] or 'Member'
+        name = re.sub('discord', 'disc\u200bord', name, flags=re.I)
+        name = re.sub('clyde', 'cly\u200bde', name, flags=re.I)[:80]
+        avatar = public_user(member)['avatar']
+        if member.get('avatar'):
+            avatar = f"https://cdn.discordapp.com/guilds/{guild_id}/users/{user['id']}/avatars/{member['avatar']}.png?size=128"
+        if not avatar:
+            discriminator = int(user.get('discriminator') or '0')
+            index = discriminator % 5 if discriminator else (int(user['id']) >> 22) % 6
+            avatar = f'https://cdn.discordapp.com/embed/avatars/{index}.png'
+        payload = {'content': content, 'username': name, 'avatar_url': avatar,
+                   'allowed_mentions': {'parse': [], 'replied_user': False}}
+        for attempt in range(2):
+            hook = await channel_hook(channel_id)
+            try:
+                return await discord(f"/webhooks/{hook['id']}/{hook['token']}?wait=true",
+                                     method='POST', payload=payload, webhook=True)
+            except HTTPException as exc:
+                if exc.status_code != 410 or attempt:
+                    raise
+                hooks.pop(channel_id, None)
 
     def csrf(request):
         raw = request.cookies.get(cookie_name, '')
@@ -223,11 +277,12 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
                     profiles[uid] = user
                 except HTTPException:
                     pass
-        await asyncio.gather(*(profile(uid) for uid in {m['author']['id'] for m in values}))
+        await asyncio.gather(*(profile(uid) for uid in {m['author']['id'] for m in values if not m.get('webhook_id')}))
         result = []
         for m in reversed(values):
             item = safe_message(m)
-            item['author'].update(profiles.get(m['author']['id'], {}))
+            if not m.get('webhook_id'):
+                item['author'].update(profiles.get(m['author']['id'], {}))
             result.append(item)
         return JSONResponse({'messages': result, 'canSend': can_send}, headers={'Cache-Control': 'no-store'})
 
@@ -266,13 +321,9 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
             raise HTTPException(429, 'Please wait for this channel’s slow mode.', headers={'Retry-After': str(wait)})
         bypass = bits & (ADMIN | MANAGE_CHANNELS | MANAGE_MESSAGES | BYPASS_SLOWMODE)
         wait = max(2, 0 if bypass else channel.get('rate_limit_per_user', 0))
-        name = re.sub(r'[\r\n\x00-\x1f\\*_~`|<>@]', '', public_user(member)['name'])[:60] or 'Member'
         sending.add(key)
         try:
-            message = await discord(f'/channels/{channel_id}/messages', method='POST', payload={
-                'content': f'**{name} · via website** (<@{uid}>)\n{content.strip()}',
-                'allowed_mentions': {'parse': [], 'replied_user': False},
-            })
+            message = await webhook_send(channel_id, member, content.strip())
             cooldowns[key] = time.monotonic() + wait
             if len(cooldowns) > 1000:
                 for old_key, until in list(cooldowns.items()):
