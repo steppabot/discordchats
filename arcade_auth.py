@@ -15,7 +15,6 @@ COOKIE = '__Host-arcade_session'
 STATE_COOKIE = '__Host-arcade_oauth'
 TTL = 60 * 60 * 24 * 7
 
-
 def install_arcade(app, transport=None):
     secret = os.getenv('ARCADE_SESSION_SECRET', '').encode()
     site = 'https://discordarcade.com'
