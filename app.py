@@ -173,6 +173,8 @@ app.add_middleware(
     allow_origins=[
         "https://www.discordchats.com",
         "https://discordchats.com",
+        "https://discordarcade.com",
+        "https://www.discordarcade.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -1009,3 +1011,7 @@ app.include_router(pay_router)
 app.include_router(me_router)
 app.include_router(mentions_router)
 app.include_router(optout_router)
+
+# DiscordArcade has independent login/session routes; archive access stays unchanged.
+from arcade_auth import install_arcade
+install_arcade(app)
