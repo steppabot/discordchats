@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import secrets
 from typing import Optional, Dict, Any, List
 import asyncpg
 import boto3
@@ -731,7 +732,11 @@ def _session_user(request: Request) -> Optional[int]:
     ver = _verify(raw) if raw else None
     if not ver: return None
     try:
-        duid = int(ver.split(":")[0]); return duid
+        duid_text, issued_text = ver.split(":", 1)
+        issued = int(issued_text)
+        if issued > time.time() + 60 or time.time() - issued > 60*60*24*30:
+            return None
+        return int(duid_text)
     except Exception:
         return None
 
@@ -803,19 +808,37 @@ async def resolve_mentions(ids: str, request: Request):
 
 # --------- OAuth ----------
 @auth_router.get("/login")
-def login():
+def login(return_to: str = "/"):
     from urllib.parse import urlencode
+    # Fixed local destinations prevent open redirects; state binds this login
+    # to the browser that initiated it before enabling website chat sends.
+    destination = return_to if return_to in ("/", "/arcade.html") else "/"
+    nonce = secrets.token_urlsafe(32)
     params = {
         "client_id": CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
         "response_type": "code",
         "scope": "identify guilds.members.read",
-        "prompt": "none"
+        "prompt": "none",
+        "state": nonce,
     }
-    return JSONResponse({"url": f"{DISCORD_OAUTH}/authorize?{urlencode(params)}"})
+    resp = JSONResponse({"url": f"{DISCORD_OAUTH}/authorize?{urlencode(params)}"})
+    resp.set_cookie("dc_oauth_state", _sign(f"{nonce}:{int(time.time())}:{destination}"),
+                    httponly=True, secure=True, samesite="Lax", max_age=600, path="/api/auth")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 @auth_router.get("/discord/callback")
-async def callback(code: str, request: Request):
+async def callback(code: str, request: Request, state: str = ""):
+    verified = _verify(request.cookies.get("dc_oauth_state", ""))
+    try:
+        nonce, issued, destination = verified.split(":", 2)
+        valid = hmac.compare_digest(state, nonce) and 0 <= time.time() - int(issued) <= 600
+        valid = valid and destination in ("/", "/arcade.html")
+    except (AttributeError, ValueError):
+        valid = False
+    if not valid:
+        raise HTTPException(status_code=400, detail="Sign-in expired or could not be verified. Start sign-in again.")
     async with httpx.AsyncClient() as client:
         tok = await client.post(f"{DISCORD_OAUTH}/token",
             data={
@@ -836,7 +859,8 @@ async def callback(code: str, request: Request):
         u = me.json()
 
     await _upsert_web_user(u)
-    resp = RedirectResponse(url=f"{SITE_BASE_URL}/?logged=1", status_code=302)
+    resp = RedirectResponse(url=f"{SITE_BASE_URL.rstrip('/')}{destination}?logged=1", status_code=302)
+    resp.delete_cookie("dc_oauth_state", path="/api/auth")
     _set_session(resp, int(u["id"]))
     return resp
 
@@ -1005,7 +1029,24 @@ async def cancel_subscription(request: Request):
 # mount routers (after app is created)
 app.include_router(auth_router)
 app.include_router(gate_router)
+
+# Optional arcade live chat. Existing archive and billing routes stay separate.
+from live_chat import create_arcade_router
+app.include_router(create_arcade_router(
+    session_user=_session_user,
+    is_booster=_is_booster_async,
+    sub_status=_sub_status,
+    settings={
+        "guild_id": GUILD_ID,
+        "bot_token": BOT_TOKEN,
+        "session_secret": SESSION_SECRET,
+        "cookie_name": SESSION_COOKIE_NAME,
+        "channel_ids": os.getenv("ARCADE_CHANNEL_IDS", ""),
+        "site_url": SITE_BASE_URL,
+    },
+))
 app.include_router(pay_router)
 app.include_router(me_router)
 app.include_router(mentions_router)
 app.include_router(optout_router)
+
