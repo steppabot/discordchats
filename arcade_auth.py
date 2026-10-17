@@ -104,6 +104,55 @@ def install_arcade(app, transport=None):
         response.delete_cookie(COOKIE, secure=True, httponly=True, samesite='lax', path='/')
         return response
 
+
+    @app.get('/api/arcade/access')
+    async def arcade_access(request: Request):
+        headers = {'Cache-Control': 'no-store'}
+        uid = session_user(request)
+
+        if not uid:
+            return JSONResponse({
+                'authenticated': False,
+                'allowed': False,
+                'reason': 'login'
+            }, headers=headers)
+
+        configured()
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=10,
+                transport=transport
+            ) as client:
+                result = await client.get(
+                    f'https://discord.com/api/v10/guilds/{guild}/members/{uid}',
+                    headers={'Authorization': 'Bot ' + token}
+                )
+
+            if result.status_code == 404:
+                return JSONResponse({
+                    'authenticated': True,
+                    'allowed': False,
+                    'reason': 'membership'
+                }, headers=headers)
+
+            result.raise_for_status()
+            member = result.json()
+            allowed = bool(member.get('premium_since'))
+
+            return JSONResponse({
+                'authenticated': True,
+                'allowed': allowed,
+                'reason': 'booster' if allowed else 'boost'
+            }, headers=headers)
+
+        except (httpx.HTTPError, ValueError):
+            return JSONResponse({
+                'allowed': False,
+                'reason': 'unavailable',
+                'detail': 'Could not verify boost status. Please try again.'
+            }, status_code=503, headers=headers)
+    
     app.include_router(create_arcade_router(session_user=session_user, is_booster=None, sub_status=None,
         settings={'guild_id': guild, 'bot_token': token, 'session_secret': secret, 'cookie_name': COOKIE,
                   'channel_ids': os.getenv('ARCADE_CHANNEL_IDS', ''), 'site_url': site,
