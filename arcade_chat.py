@@ -19,7 +19,6 @@ from fastapi.responses import JSONResponse
 VIEW, SEND, HISTORY, ADMIN = 1024, 2048, 65536, 8
 MANAGE_CHANNELS, MANAGE_MESSAGES, BYPASS_SLOWMODE = 16, 8192, 1 << 52
 
-
 def permission_bits(member, guild, roles, channel):
     """Discord's everyone -> aggregated roles -> member overwrite order."""
     if str(member['user']['id']) == str(guild.get('owner_id')):
