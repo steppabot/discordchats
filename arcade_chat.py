@@ -226,15 +226,54 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
         return channel, bits, can_read, can_send
 
     def safe_message(message):
-        author = message.get('author') or {'id': '', 'username': 'Unknown'}
+        author = message.get('author') or {
+            'id': '',
+            'username': 'Unknown'
+        }
+
         attachments = []
         for item in message.get('attachments', []):
             url = item.get('url', '')
             parsed = urlparse(url)
-            if parsed.scheme == 'https' and parsed.hostname in ('cdn.discordapp.com', 'media.discordapp.net'):
-                attachments.append({'url': url, 'name': item.get('filename') or 'Attachment', 'type': item.get('content_type', '')})
-        return {'id': message['id'], 'content': message.get('content', ''), 'timestamp': message['timestamp'],
-                'author': {**public_user({'user': author}), 'bot': bool(author.get('bot'))}, 'attachments': attachments}
+
+            if (
+                parsed.scheme == 'https'
+                and parsed.hostname in (
+                    'cdn.discordapp.com',
+                    'media.discordapp.net'
+                )
+            ):
+                attachments.append({
+                    'url': url,
+                    'name': item.get('filename') or 'Attachment',
+                    'type': item.get('content_type', '')
+                })
+
+        mentions = []
+        for user in message.get('mentions', []):
+            member = user.get('member') or {}
+
+            mentions.append({
+                'id': str(user['id']),
+                'name': (
+                    member.get('nick')
+                    or user.get('global_name')
+                    or user.get('username')
+                    or 'Unknown User'
+                )
+            })
+
+        return {
+            'id': message['id'],
+            'content': message.get('content', ''),
+            'timestamp': message['timestamp'],
+            'author': {
+                **public_user({'user': author}),
+                'bot': bool(author.get('bot'))
+            },
+            'attachments': attachments,
+            'mentions': mentions
+        }
 
     @router.get('/config')
     async def config():
