@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
 
+ATTACH_FILES = 32768
 VIEW, SEND, HISTORY, ADMIN = 1024, 2048, 65536, 8
 MANAGE_CHANNELS, MANAGE_MESSAGES, BYPASS_SLOWMODE = 16, 8192, 1 << 52
 
@@ -115,14 +116,15 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
         if count >= maximum:
             raise HTTPException(429, 'Please wait before trying again.', headers={'Retry-After': str(max(1, int(until - now) + 1))})
 
-    async def discord(path, *, method='GET', payload=None, webhook=False):
+    async def discord(path, *, method='GET', payload=None, webhook=False, files=None):
         nonlocal blocked_until
         if blocked_until > time.monotonic():
             raise HTTPException(429, 'Discord is rate limiting chat.', headers={'Retry-After': str(int(blocked_until - time.monotonic()) + 1)})
         try:
-            async with httpx.AsyncClient(timeout=10.0, transport=transport) as client:
+            async with httpx.AsyncClient(timeout=25.0 if files else 10.0, transport=transport) as client:
                 result = await client.request(method, 'https://discord.com/api/v10' + path,
-                                              headers={} if webhook else {'Authorization': f'Bot {bot_token}'}, json=payload)
+                                              headers={} if webhook else {'Authorization': f'Bot {bot_token}'},
+                                              **({'data': {'payload_json': json.dumps(payload)}, 'files': files} if files else {'json': payload}))
         except httpx.HTTPError:
             raise HTTPException(502, 'Discord is temporarily unavailable.') from None
         if result.status_code == 429:
@@ -166,7 +168,7 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
             hooks[channel_id] = hook
             return hook
 
-    async def webhook_send(channel_id, member, content):
+    async def webhook_send(channel_id, member, content, uploads=None):
         user = member['user']
         name = public_user(member)['name']
         name = re.sub(r'[\x00-\x1f\x7f]', '', name).strip()[:80] or 'Member'
@@ -181,11 +183,14 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
             avatar = f'https://cdn.discordapp.com/embed/avatars/{index}.png'
         payload = {'content': content, 'username': name, 'avatar_url': avatar,
                    'allowed_mentions': {'parse': [], 'replied_user': False}}
+        files = [(f'files[{i}]', item) for i, item in enumerate(uploads or [])]
+        if files:
+            payload['attachments'] = [{'id': i, 'filename': item[0]} for i, item in enumerate(uploads)]
         for attempt in range(2):
             hook = await channel_hook(channel_id)
             try:
                 return await discord(f"/webhooks/{hook['id']}/{hook['token']}?wait=true",
-                                     method='POST', payload=payload, webhook=True)
+                                     method='POST', payload=payload, webhook=True, files=files)
             except HTTPException as exc:
                 if exc.status_code != 410 or attempt:
                     raise
@@ -227,7 +232,7 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
             url = item.get('url', '')
             parsed = urlparse(url)
             if parsed.scheme == 'https' and parsed.hostname in ('cdn.discordapp.com', 'media.discordapp.net'):
-                attachments.append({'url': url, 'name': item.get('filename') or 'Attachment'})
+                attachments.append({'url': url, 'name': item.get('filename') or 'Attachment', 'type': item.get('content_type', '')})
         return {'id': message['id'], 'content': message.get('content', ''), 'timestamp': message['timestamp'],
                 'author': {**public_user({'user': author}), 'bot': bool(author.get('bot'))}, 'attachments': attachments}
 
@@ -257,7 +262,7 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
     @router.get('/messages')
     async def messages(request: Request, channel: str):
         member = await require_user(request)
-        _, _, can_read, can_send = await info(member, channel)
+        _, bits, can_read, can_send = await info(member, channel)
         if not can_read:
             raise HTTPException(403, 'Your Discord account cannot read this channel.')
         values = await cached(f'/channels/{channel}/messages?limit=50')
@@ -284,37 +289,69 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
             if not m.get('webhook_id'):
                 item['author'].update(profiles.get(m['author']['id'], {}))
             result.append(item)
-        return JSONResponse({'messages': result, 'canSend': can_send}, headers={'Cache-Control': 'no-store'})
+        return JSONResponse({'messages': result, 'canSend': can_send, 'canAttach': can_send and bool(bits & ATTACH_FILES)}, headers={'Cache-Control': 'no-store'})
 
     @router.post('/messages')
     async def send(request: Request):
         if request.headers.get('origin') not in origins or not hmac.compare_digest(request.headers.get('x-csrf-token', ''), csrf(request)):
             raise HTTPException(403, 'Request could not be verified. Reload the arcade.')
-        if not request.headers.get('content-type', '').startswith('application/json'):
-            raise HTTPException(415, 'Expected JSON.')
+        member = await require_user(request)
+        uid = str(member['user']['id'])
+        limit(('send', uid), 15, 60)
+        content_type = request.headers.get('content-type', '')
+        multipart = content_type.startswith('multipart/form-data')
+        if not multipart and not content_type.startswith('application/json'):
+            raise HTTPException(415, 'Expected JSON or file upload.')
         raw = bytearray()
         async for chunk in request.stream():
             raw.extend(chunk)
-            if len(raw) > 10000:
-                raise HTTPException(413, 'Message is too large.')
-        try:
-            payload = json.loads(raw)
-        except (ValueError, UnicodeError):
-            raise HTTPException(400, 'Invalid JSON.') from None
+            if len(raw) > (20 * 1024 * 1024 + 65536 if multipart else 10000):
+                raise HTTPException(413, 'Attachments must total 20 MB or less.')
+        uploads = []
+        if multipart:
+            request._body = bytes(raw)
+            async with request.form(max_files=4, max_fields=2) as form:
+                payload = {'channel': form.get('channel'), 'content': form.get('content', '')}
+                for field, item in form.multi_items():
+                    if not hasattr(item, 'filename'):
+                        continue
+                    if field != 'files':
+                        raise HTTPException(400, 'Invalid file field.')
+                    data = await item.read(8 * 1024 * 1024 + 1)
+                    if not data or len(data) > 8 * 1024 * 1024:
+                        raise HTTPException(413, 'Each attachment must be between 1 byte and 8 MB.')
+                    mime = item.content_type or ''
+                    valid = ((mime == 'image/png' and data.startswith(b'\x89PNG\r\n\x1a\n'))
+                        or (mime == 'image/jpeg' and data.startswith(b'\xff\xd8\xff'))
+                        or (mime == 'image/gif' and data[:6] in (b'GIF87a', b'GIF89a'))
+                        or (mime == 'image/webp' and data[:4] == b'RIFF' and data[8:12] == b'WEBP')
+                        or (mime == 'video/mp4' and data[4:8] == b'ftyp')
+                        or (mime == 'video/webm' and data.startswith(b'\x1a\x45\xdf\xa3')))
+                    if not valid:
+                        raise HTTPException(415, 'Choose a PNG, JPG, GIF, WebP, MP4 or WebM file.')
+                    extension = {'image/png':'.png','image/jpeg':'.jpg','image/gif':'.gif','image/webp':'.webp','video/mp4':'.mp4','video/webm':'.webm'}[mime]
+                    stem = re.sub(r'[^a-zA-Z0-9_-]', '_', (item.filename or 'attachment').rsplit('.', 1)[0])[:70] or 'attachment'
+                    uploads.append((f'{len(uploads)+1}-{stem}{extension}', data, mime))
+                if sum(len(item[1]) for item in uploads) > 20 * 1024 * 1024:
+                    raise HTTPException(413, 'Attachments must total 20 MB or less.')
+        else:
+            try:
+                payload = json.loads(raw)
+            except (ValueError, UnicodeError):
+                raise HTTPException(400, 'Invalid JSON.') from None
         if not isinstance(payload, dict):
             raise HTTPException(400, 'Invalid message.')
         channel_id = payload.get('channel')
         if not isinstance(channel_id, str) or channel_id not in allowed:
             raise HTTPException(403, 'This channel is not enabled for the arcade.')
-        member = await require_user(request)
-        uid = str(member['user']['id'])
-        limit(('send', uid), 15, 60)
         channel, bits, _, can_send = await info(member, channel_id)
         if not can_send:
             raise HTTPException(403, 'Your Discord account cannot send in this channel.')
-        content = payload.get('content')
-        if not isinstance(content, str) or not content.strip() or len(content) > 1800:
-            raise HTTPException(400, 'Write a message between 1 and 1800 characters.')
+        if uploads and not bits & ATTACH_FILES:
+            raise HTTPException(403, 'Your Discord account cannot attach files in this channel.')
+        content = payload.get('content', '')
+        if not isinstance(content, str) or (not content.strip() and not uploads) or len(content) > 1800:
+            raise HTTPException(400, 'Add a message or attachment; text is limited to 1800 characters.')
         key = (uid, channel_id)
         if key in sending or cooldowns.get(key, 0) > time.monotonic():
             wait = max(2, int(cooldowns.get(key, 0) - time.monotonic()) + 1)
@@ -323,7 +360,7 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
         wait = max(2, 0 if bypass else channel.get('rate_limit_per_user', 0))
         sending.add(key)
         try:
-            message = await webhook_send(channel_id, member, content.strip())
+            message = await webhook_send(channel_id, member, content.strip(), uploads)
             cooldowns[key] = time.monotonic() + wait
             if len(cooldowns) > 1000:
                 for old_key, until in list(cooldowns.items()):
