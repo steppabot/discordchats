@@ -265,7 +265,11 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
 
         return {
             'id': message['id'],
-            'content': message.get('content', ''),
+            'content': (
+                '📌 pinned a message to this channel.'
+                if message.get('type') == 6
+                else message.get('content', '')
+            ),
             'timestamp': message['timestamp'],
             'author': {
                 **public_user({'user': author}),
