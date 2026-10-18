@@ -11,6 +11,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from arcade_chat import create_arcade_router, public_user
 from arcade_sessions import SessionStore
+from arcade_leaderboards import create_leaderboard_router
 
 COOKIE = '__Host-token_session'
 STATE_COOKIE = '__Host-arcade_oauth'
@@ -166,3 +167,12 @@ def install_arcade(app, transport=None, store=None):
         settings={'bot_token': token, 'session_secret': secret, 'cookie_name': COOKIE,
                   'site_url': site, 'relay_secret': os.getenv('ARCADE_RELAY_SECRET', ''),
                   'session_profile': profile, 'user_guilds': user_guilds}, transport=transport))
+
+    app.include_router(create_leaderboard_router(
+        store=store,
+        session_user=session_user,
+        profile=profile,
+        secret=secret,
+        cookie_name=COOKIE,
+        origins=origins
+    ))
