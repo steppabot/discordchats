@@ -565,4 +565,71 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
         finally:
             subscribers.pop(queue, None)
 
+
+    @router.get('/emojis')
+    async def emojis(request: Request, channel: str):
+        member = await require_user(request)
+        _, bits, can_read, _ = await info(member, channel)
+
+        if not can_read:
+            raise HTTPException(403, 'You cannot access this channel.')
+
+        guild_id = member['_arcade_guild_id']
+        values = await cached(f'/guilds/{guild_id}/emojis')
+
+        bot = await cached('/users/@me')
+        bot_member = await cached(
+            f"/guilds/{guild_id}/members/{bot['id']}"
+        )
+
+        user_roles = set(member.get('roles', []))
+        bot_roles = set(bot_member.get('roles', []))
+        result = []
+
+        for emoji in values:
+            if emoji.get('available') is False:
+                continue
+
+            restricted_roles = set(emoji.get('roles') or [])
+
+            if restricted_roles:
+                user_allowed = (
+                    bool(bits & ADMIN)
+                    or bool(user_roles & restricted_roles)
+                )
+                bot_allowed = bool(bot_roles & restricted_roles)
+
+                if not user_allowed or not bot_allowed:
+                    continue
+
+            name = emoji.get('name') or ''
+            emoji_id = str(emoji.get('id') or '')
+
+            if not emoji_id.isdigit() or not re.fullmatch(
+                r'[A-Za-z0-9_]+', name
+            ):
+                continue
+
+            animated = bool(emoji.get('animated'))
+
+            result.append({
+                'id': emoji_id,
+                'name': name,
+                'animated': animated,
+                'url': (
+                    f'https://cdn.discordapp.com/emojis/{emoji_id}.'
+                    f'{"gif" if animated else "png"}?size=48'
+                ),
+                'token': (
+                    f'<{"a" if animated else ""}:{name}:{emoji_id}>'
+                )
+            })
+
+        result.sort(key=lambda item: item['name'].casefold())
+
+        return JSONResponse(
+            {'emojis': result},
+            headers={'Cache-Control': 'no-store'}
+        )
+
     return router
