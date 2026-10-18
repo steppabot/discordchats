@@ -72,6 +72,49 @@ def public_user(member):
             'avatar': f"https://cdn.discordapp.com/avatars/{user['id']}/{avatar}.png?size=64" if avatar else None}
 
 
+def embed_url(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = urlparse(value)
+        if parsed.scheme == 'https' and parsed.hostname and not parsed.username and not parsed.password:
+            return value
+    except ValueError:
+        pass
+    return None
+
+
+def safe_embeds(items):
+    result = []
+    for item in (items or [])[:10]:
+        if not isinstance(item, dict):
+            continue
+        def text(value, limit):
+            return value[:limit] if isinstance(value, str) else ''
+        def media(key):
+            value = item.get(key) or {}
+            return embed_url(value.get('proxy_url')) or embed_url(value.get('url'))
+        author = item.get('author') or {}
+        footer = item.get('footer') or {}
+        color = item.get('color')
+        result.append({
+            'title': text(item.get('title'), 256),
+            'description': text(item.get('description'), 4096),
+            'url': embed_url(item.get('url')),
+            'color': color if isinstance(color, int) and 0 <= color <= 0xffffff else None,
+            'image': media('image'), 'thumbnail': media('thumbnail'),
+            'author': {'name': text(author.get('name'), 256), 'url': embed_url(author.get('url')),
+                       'icon': embed_url(author.get('proxy_icon_url')) or embed_url(author.get('icon_url'))},
+            'footer': {'text': text(footer.get('text'), 2048),
+                       'icon': embed_url(footer.get('proxy_icon_url')) or embed_url(footer.get('icon_url'))},
+            'fields': [{'name': text(f.get('name'), 256), 'value': text(f.get('value'), 1024),
+                        'inline': f.get('inline') is True} for f in (item.get('fields') or [])[:25] if isinstance(f, dict)],
+            'timestamp': text(item.get('timestamp'), 64),
+            'video_url': embed_url(item.get('url')) if item.get('video') else None
+        })
+    return result
+
+
 def create_arcade_router(*, session_user, is_booster, sub_status, settings, transport=None):
     router = APIRouter(prefix='/api/arcade', tags=['arcade'])
     bot_token = settings.get('bot_token') or ''
@@ -229,7 +272,7 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
         can_send = can_read and bool(bits & SEND) and bool(bot_bits & SEND) and not member.get('pending')
         return channel, bits, can_read, can_send
 
-    def safe_message(message):
+    def safe_message(message, roles=()):
         author = message.get('author') or {
             'id': '',
             'username': 'Unknown'
@@ -267,6 +310,10 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
                 )
             })
 
+        embeds = safe_embeds(message.get('embeds'))
+        role_ids = set(re.findall(r'<@&(\d+)>', str(message.get('content', '')) + json.dumps(embeds)))
+        mentions.extend({'id': str(role['id']), 'name': role['name']} for role in roles if str(role['id']) in role_ids)
+
         return {
             'id': message['id'],
             'content': (
@@ -280,7 +327,8 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
                 'bot': bool(author.get('bot'))
             },
             'attachments': attachments,
-            'mentions': mentions
+            'mentions': mentions,
+            'embeds': embeds
         }
 
     @router.get('/config')
@@ -365,7 +413,7 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
         await asyncio.gather(*(profile(uid) for uid in {m['author']['id'] for m in values if not m.get('webhook_id')}))
         result = []
         for m in reversed(values):
-            item = safe_message(m)
+            item = safe_message(m, roles)
             if not m.get('webhook_id'):
                 item['author'].update(profiles.get(m['author']['id'], {}))
             result.append(item)
