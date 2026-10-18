@@ -1,8 +1,4 @@
-"""Wolfpac arcade: permission-checked live chat using the existing site login.
-
-Only ARCADE_CHANNEL_IDS in DISCORD_GUILD_ID are exposed. Browser sends use
-webhook identity overrides derived from the authenticated server member. No archive writes.
-"""
+"""Token multi-server chat: per-user and bot permission checks on every operation."""
 import asyncio
 import hashlib
 import hmac
@@ -78,19 +74,15 @@ def public_user(member):
 
 def create_arcade_router(*, session_user, is_booster, sub_status, settings, transport=None):
     router = APIRouter(prefix='/api/arcade', tags=['arcade'])
-    guild_id = str(settings.get('guild_id') or '')
     bot_token = settings.get('bot_token') or ''
     secret = settings.get('session_secret') or b''
     cookie_name = settings.get('cookie_name', 'dc_sid')
-    channel_ids = tuple(dict.fromkeys(x.strip() for x in settings.get('channel_ids', '').split(',') if x.strip()))
-    allowed = set(channel_ids)
     origins = {'https://www.discordarcade.com', 'https://discordarcade.com'}
     site = settings.get('site_url') or ''
     parsed_site = urlparse(site)
     if parsed_site.scheme == 'https' and parsed_site.netloc:
         origins.add(f'{parsed_site.scheme}://{parsed_site.netloc}')
-    configured = bool(bot_token and guild_id.isdigit() and int(guild_id) > 0 and allowed and len(allowed) <= 20
-                      and all(x.isdigit() for x in allowed) and len(secret) >= 32 and secret != b'dev_dev_dev')
+    configured = bool(bot_token and len(secret) >= 32 and settings.get('session_profile') and settings.get('user_guilds'))
     cache, rates, cooldowns, sending = {}, {}, {}, set()
     subscribers = {}
     relay_secret = settings.get('relay_secret', '')
@@ -101,7 +93,7 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
 
     def require_config():
         if not configured:
-            raise HTTPException(503, 'Arcade chat setup is pending. Set ARCADE_CHANNEL_IDS and a strong SESSION_SECRET on the existing backend.')
+            raise HTTPException(503, 'Arcade chat setup is pending. Check the API bot token, session secret and login configuration.')
 
     def limit(key, maximum, seconds):
         now = time.monotonic()
@@ -135,6 +127,8 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
             raise HTTPException(410, 'Arcade webhook was deleted.')
         if result.status_code == 403 and '/webhooks' in path:
             raise HTTPException(503, 'The server bot needs Manage Webhooks in this channel.')
+        if result.status_code in (403, 404) and not webhook and '/webhooks' not in path:
+            raise HTTPException(403, 'Token or your account cannot access this server or channel.')
         if result.status_code == 404 and '/members/' in path:
             raise HTTPException(403, 'You must be a current member of this Discord server.')
         if not result.is_success:
@@ -148,6 +142,8 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
             if entry and entry[0] > time.monotonic():
                 return entry[1]
             value = await discord(path)
+            if len(cache) >= 2000:
+                cache.clear()
             cache[path] = (time.monotonic() + 5, value)
             return value
 
@@ -169,6 +165,7 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
             return hook
 
     async def webhook_send(channel_id, member, content, uploads=None):
+        guild_id = member['_arcade_guild_id']
         user = member['user']
         name = public_user(member)['name']
         name = re.sub(r'[\x00-\x1f\x7f]', '', name).strip()[:80] or 'Member'
@@ -202,27 +199,34 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
 
     async def require_user(request):
         require_config()
-        uid = session_user(request)
+        uid = await session_user(request)
         if not uid:
             raise HTTPException(401, 'Sign in with Discord to use live chat.')
         limit(('read', uid), 180, 60)
-        # Membership and roles are refreshed on every request, including sends.
+        guild_id = request.query_params.get('guild', '')
+        if not guild_id.isdigit():
+            raise HTTPException(400, 'Choose a server first.')
+        # Membership and roles are refreshed with a five-second cache, including sends.
         member = await cached(f'/guilds/{guild_id}/members/{uid}')
         if str(member.get('user', {}).get('id')) != str(uid):
             raise HTTPException(403, 'Your server membership could not be verified.')
-        return member
+        return {**member, '_arcade_guild_id': guild_id}
 
     async def info(member, channel_id):
-        if channel_id not in allowed:
-            raise HTTPException(403, 'This channel is not enabled for the arcade.')
+        if not isinstance(channel_id, str) or not channel_id.isdigit():
+            raise HTTPException(403, 'Invalid channel.')
+        guild_id = member['_arcade_guild_id']
         guild = await cached(f'/guilds/{guild_id}')
         roles = await cached(f'/guilds/{guild_id}/roles')
         channel = await cached(f'/channels/{channel_id}')
         if channel.get('guild_id') != guild_id or guild.get('id') != guild_id or channel.get('type') != 0 or channel.get('nsfw'):
             raise HTTPException(403, 'Only enabled, non-age-restricted text channels in this server are available.')
         bits = permission_bits(member, guild, roles, channel)
-        can_read = bits & (VIEW | HISTORY) == VIEW | HISTORY
-        can_send = can_read and bool(bits & SEND) and not member.get('pending')
+        bot = await cached('/users/@me')
+        bot_member = await cached(f"/guilds/{guild_id}/members/{bot['id']}")
+        bot_bits = permission_bits(bot_member, guild, roles, channel)
+        can_read = all(value & (VIEW | HISTORY) == VIEW | HISTORY for value in (bits, bot_bits))
+        can_send = can_read and bool(bits & SEND) and bool(bot_bits & SEND) and not member.get('pending')
         return channel, bits, can_read, can_send
 
     def safe_message(message):
@@ -281,22 +285,54 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
 
     @router.get('/config')
     async def config():
-        return JSONResponse({'configured': configured, 'serverName': 'Wolfpac'}, headers={'Cache-Control': 'no-store'})
+        return JSONResponse({'configured': configured, 'serverName': 'Your servers', 'multiServer': True}, headers={'Cache-Control': 'no-store'})
 
     @router.get('/me')
     async def me(request: Request):
-        member = await require_user(request)
-        return JSONResponse({'user': public_user(member), 'csrf': csrf(request)}, headers={'Cache-Control': 'no-store'})
+        require_config()
+        user = await settings['session_profile'](request)
+        return JSONResponse({'user': user, 'csrf': csrf(request)}, headers={'Cache-Control': 'no-store'})
+
+    @router.get('/servers')
+    async def servers(request: Request):
+        require_config()
+        uid = await session_user(request)
+        if not uid:
+            raise HTTPException(401, 'Sign in with Discord.')
+        limit(('servers', uid), 10, 60)
+        user_servers = await settings['user_guilds'](request)
+        bot_servers, after = set(), '0'
+        while True:
+            page = await cached(f'/users/@me/guilds?limit=200&after={after}')
+            bot_servers.update(str(g['id']) for g in page)
+            if len(page) < 200:
+                break
+            next_after = str(max(int(g['id']) for g in page))
+            if next_after == after:
+                raise HTTPException(502, 'Could not load servers.')
+            after = next_after
+        shared = [{'id': str(g['id']), 'name': g['name'],
+                   'icon': f"https://cdn.discordapp.com/icons/{g['id']}/{g['icon']}.png?size=96" if g.get('icon') else None}
+                  for g in user_servers if str(g['id']) in bot_servers]
+        shared.sort(key=lambda g: g['name'].casefold())
+        return JSONResponse({'servers': shared}, headers={'Cache-Control': 'no-store'})
 
     @router.get('/channels')
     async def channels(request: Request):
         member = await require_user(request)
+        guild_id = member['_arcade_guild_id']
         available = []
-        for channel_id in channel_ids:
+        guild_channels = await cached(f'/guilds/{guild_id}/channels')
+        categories = {c['id']: c for c in guild_channels if c.get('type') == 4}
+        for candidate in sorted(guild_channels, key=lambda c: (categories.get(c.get('parent_id'), {}).get('position', -1), c.get('position', 0), int(c['id']))):
+            if candidate.get('type') != 0 or candidate.get('nsfw'):
+                continue
+            channel_id = str(candidate['id'])
+            cache[f'/channels/{channel_id}'] = (time.monotonic() + 5, candidate)
             try:
                 channel, _, can_read, can_send = await info(member, channel_id)
                 if can_read:
-                    available.append({'id': channel_id, 'name': channel['name'], 'canSend': can_send})
+                    available.append({'id': channel_id, 'name': channel['name'], 'canSend': can_send, 'category': categories.get(channel.get('parent_id'), {}).get('name', 'Text channels')})
             except HTTPException as exc:
                 if exc.status_code != 403:
                     raise
@@ -305,6 +341,7 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
     @router.get('/messages')
     async def messages(request: Request, channel: str):
         member = await require_user(request)
+        guild_id = member['_arcade_guild_id']
         _, bits, can_read, can_send = await info(member, channel)
         if not can_read:
             raise HTTPException(403, 'Your Discord account cannot read this channel.')
@@ -385,7 +422,7 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
         if not isinstance(payload, dict):
             raise HTTPException(400, 'Invalid message.')
         channel_id = payload.get('channel')
-        if not isinstance(channel_id, str) or channel_id not in allowed:
+        if not isinstance(channel_id, str) or not channel_id.isdigit():
             raise HTTPException(403, 'This channel is not enabled for the arcade.')
         channel, bits, _, can_send = await info(member, channel_id)
         if not can_send:
@@ -427,12 +464,13 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
         try:
             event = json.loads(raw)
             channel = str(event['channel_id'])
-            if str(event['guild_id']) != guild_id or channel not in allowed:
+            guild_id = str(event['guild_id'])
+            if not guild_id.isdigit() or not channel.isdigit():
                 raise ValueError()
         except (ValueError, KeyError, TypeError):
             raise HTTPException(400, 'Invalid event.') from None
         async with cache_lock:
-            cache.clear()
+            cache.pop(f'/channels/{channel}/messages?limit=50', None)
         for queue, selected in list(subscribers.items()):
             if selected == channel and queue.empty():
                 queue.put_nowait(True)
