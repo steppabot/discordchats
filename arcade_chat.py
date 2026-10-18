@@ -293,7 +293,8 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
                 attachments.append({
                     'url': url,
                     'name': item.get('filename') or 'Attachment',
-                    'type': item.get('content_type', '')
+                    'type': item.get('content_type', ''),
+                    'proxy_url': (embed_url(item.get('proxy_url')) if urlparse(item.get('proxy_url') or '').hostname in ('cdn.discordapp.com', 'media.discordapp.net') else None)
                 })
 
         mentions = []
