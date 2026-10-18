@@ -294,7 +294,14 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
                     'url': url,
                     'name': item.get('filename') or 'Attachment',
                     'type': item.get('content_type', ''),
-                    'proxy_url': (embed_url(item.get('proxy_url')) if urlparse(item.get('proxy_url') or '').hostname in ('cdn.discordapp.com', 'media.discordapp.net') else None)
+                    'proxy_url': (
+                        embed_url(item.get('proxy_url'))
+                        if urlparse(item.get('proxy_url') or '').hostname in (
+                            'cdn.discordapp.com',
+                            'media.discordapp.net'
+                        )
+                        else None
+                    )
                 })
 
         mentions = []
@@ -312,8 +319,31 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
             })
 
         embeds = safe_embeds(message.get('embeds'))
-        role_ids = set(re.findall(r'<@&(\d+)>', str(message.get('content', '')) + json.dumps(embeds)))
-        mentions.extend({'id': str(role['id']), 'name': role['name']} for role in roles if str(role['id']) in role_ids)
+        role_ids = set(re.findall(
+            r'<@&(\d+)>',
+            str(message.get('content', '')) + json.dumps(embeds)
+        ))
+        mentions.extend(
+            {
+                'id': str(role['id']),
+                'name': role['name']
+            }
+            for role in roles
+            if str(role['id']) in role_ids
+        )
+
+        reactions = []
+        for reaction in message.get('reactions') or []:
+            emoji = reaction.get('emoji') or {}
+
+            reactions.append({
+                'count': reaction.get('count', 0),
+                'emoji': {
+                    'id': emoji.get('id'),
+                    'name': emoji.get('name'),
+                    'animated': bool(emoji.get('animated', False))
+                }
+            })
 
         return {
             'id': message['id'],
@@ -329,9 +359,9 @@ def create_arcade_router(*, session_user, is_booster, sub_status, settings, tran
             },
             'attachments': attachments,
             'mentions': mentions,
-            'embeds': embeds
+            'embeds': embeds,
+            'reactions': reactions
         }
-
     @router.get('/config')
     async def config():
         return JSONResponse({'configured': configured, 'serverName': 'Your servers', 'multiServer': True}, headers={'Cache-Control': 'no-store'})
