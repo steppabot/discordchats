@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from arcade_chat import create_arcade_router, public_user
 from arcade_sessions import SessionStore
 from arcade_leaderboards import create_leaderboard_router
+from arcade_groups import create_group_router
 
 COOKIE = '__Host-token_session'
 STATE_COOKIE = '__Host-arcade_oauth'
@@ -140,6 +141,35 @@ def install_arcade(app, transport=None, store=None):
         response.delete_cookie(COOKIE, secure=True, httponly=True, samesite='lax', path='/')
         return response
 
+    premium_cache = {}
+
+    async def premium_status(uid):
+        """True when the user boosts the Premium server. Raises httpx/ValueError if Discord fails."""
+        if not booster_guild.isdigit():
+            return False
+        async with httpx.AsyncClient(timeout=10, transport=transport) as client:
+            result = await client.get(f'https://discord.com/api/v10/guilds/{booster_guild}/members/{uid}',
+                                      headers={'Authorization': 'Bot ' + token})
+        if result.status_code == 404:
+            return False
+        result.raise_for_status()
+        return bool(result.json().get('premium_since'))
+
+    async def is_premium(uid):
+        # Groups check Premium on every join and connection; cache briefly.
+        cached = premium_cache.get(str(uid))
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
+        configured()
+        try:
+            allowed = await premium_status(uid)
+        except (httpx.HTTPError, ValueError):
+            raise HTTPException(503, 'Could not check Premium right now. Try again.') from None
+        if len(premium_cache) > 5000:
+            premium_cache.clear()
+        premium_cache[str(uid)] = (time.monotonic() + 60, allowed)
+        return allowed
+
     @app.get('/api/arcade/access')
     async def arcade_access(request: Request):
         uid = await session_user(request)
@@ -149,14 +179,7 @@ def install_arcade(app, transport=None, store=None):
         if not booster_guild.isdigit():
             return JSONResponse({'authenticated': True, 'allowed': False, 'reason': 'premium'}, headers=headers)
         try:
-            async with httpx.AsyncClient(timeout=10, transport=transport) as client:
-                result = await client.get(f'https://discord.com/api/v10/guilds/{booster_guild}/members/{uid}',
-                                          headers={'Authorization': 'Bot ' + token})
-            if result.status_code == 404:
-                allowed = False
-            else:
-                result.raise_for_status()
-                allowed = bool(result.json().get('premium_since'))
+            allowed = await premium_status(uid)
             # Do not advertise the private booster benefit in the browser response.
             return JSONResponse({'authenticated': True, 'allowed': allowed,
                                  'reason': 'premium' if not allowed else 'active'}, headers=headers)
@@ -167,6 +190,15 @@ def install_arcade(app, transport=None, store=None):
         settings={'bot_token': token, 'session_secret': secret, 'cookie_name': COOKIE,
                   'site_url': site, 'relay_secret': os.getenv('ARCADE_RELAY_SECRET', ''),
                   'session_profile': profile, 'user_guilds': user_guilds}, transport=transport))
+
+    def csrf_for(request):
+        raw = request.cookies.get(COOKIE, '')
+        return hmac.new(secret, ('arcade-csrf:' + raw).encode(), hashlib.sha256).hexdigest()
+
+    app.include_router(create_group_router(
+        session_user=session_user, is_premium=is_premium, profile=profile, csrf=csrf_for,
+        origins=origins, relay_secret=os.getenv('ARCADE_RELAY_SECRET', ''), bot_token=token,
+        transport=transport))
 
     app.include_router(create_leaderboard_router(
         store=store,
