@@ -73,6 +73,13 @@ class GroupTests(unittest.TestCase):
                                json={'game': 'mario', 'guild_id': '100', 'channel_id': '200', **user('1')})
         self.assertEqual(r.status_code, 400)
 
+    def test_revenge_groups(self):
+        r = self.client().post('/api/arcade/bot/groups', headers=BOT,
+                               json={'game': 'wcwvsnworevenge', 'guild_id': '100', 'channel_id': '200', **user('1')})
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertEqual(r.json()['title'], 'WCW vs NWO Revenge')
+        self.assertEqual(r.json()['max'], 4)
+
     def test_join_assigns_slots_and_caps_at_four(self):
         g = self.create('1')
         self.assertEqual([p['slot'] for p in g['players']], [1])
