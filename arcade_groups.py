@@ -19,7 +19,10 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
-GAMES = {'goldeneye007': {'title': 'GoldenEye 007', 'max': 4}}
+GAMES = {
+    'goldeneye007': {'title': 'GoldenEye 007', 'max': 4},
+    'wcwvsnworevenge': {'title': 'WCW vs NWO Revenge', 'max': 4},
+}
 MIN_PLAYERS = 2
 LOBBY_TTL = 2 * 60 * 60      # idle lobby lifetime
 PLAYING_TTL = 6 * 60 * 60    # a running game, with nobody connected
